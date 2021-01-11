@@ -1,6 +1,13 @@
 import hammerhead from '../deps/hammerhead';
-import { domUtils, styleUtils, positionUtils, promiseUtils, scrollController, sendRequestToFrame } from '../deps/testcafe-core';
-
+import {
+    domUtils,
+    styleUtils,
+    positionUtils,
+    promiseUtils,
+    scrollController,
+    sendRequestToFrame
+} from '../deps/testcafe-core';
+import isIframeWindow from '../../../utils/is-window-in-iframe';
 
 const Promise        = hammerhead.Promise;
 const messageSandbox = hammerhead.eventSandbox.message;
@@ -10,7 +17,6 @@ const SCROLL_MARGIN_INCREASE_STEP = 20;
 
 const SCROLL_REQUEST_CMD  = 'automation|scroll|request';
 const SCROLL_RESPONSE_CMD = 'automation|scroll|response';
-
 
 // Setup cross-iframe interaction
 messageSandbox.on(messageSandbox.SERVICE_MSG_RECEIVED_EVENT, e => {
@@ -34,8 +40,11 @@ export default class ScrollAutomation {
         this.offsetY          = scrollOptions.offsetY;
         this.scrollToCenter   = scrollOptions.scrollToCenter;
         this.skipParentFrames = scrollOptions.skipParentFrames;
+        this.raiseEvents      = scrollOptions.raiseEvents;
 
         this.maxScrollMargin = { left: DEFAULT_MAX_SCROLL_MARGIN, top: DEFAULT_MAX_SCROLL_MARGIN };
+
+        this.scrollWasPerformed = false;
     }
 
     _isScrollValuesChanged (scrollElement, originalScroll) {
@@ -54,7 +63,7 @@ export default class ScrollAutomation {
         left = Math.max(left, 0);
         top  = Math.max(top, 0);
 
-        const scrollPromise = scrollController.waitForScroll();
+        let scrollPromise = scrollController.waitForScroll(scrollElement);
 
         styleUtils.setScrollLeft(scrollElement, left);
         styleUtils.setScrollTop(scrollElement, top);
@@ -64,6 +73,10 @@ export default class ScrollAutomation {
 
             return Promise.resolve();
         }
+
+        scrollPromise = scrollPromise.then(() => {
+            this.scrollWasPerformed = this.scrollWasPerformed || this._isScrollValuesChanged(scrollElement, originalScroll);
+        });
 
         return scrollPromise;
     }
@@ -247,7 +260,7 @@ export default class ScrollAutomation {
 
         return scrollParentsPromise
             .then(() => {
-                if (window.top !== window && !this.skipParentFrames) {
+                if (isIframeWindow(window) && !this.skipParentFrames) {
                     return sendRequestToFrame({
                         cmd:             SCROLL_REQUEST_CMD,
                         offsetX:         currentOffsetX,
@@ -278,6 +291,7 @@ export default class ScrollAutomation {
     run () {
         return this
             ._scrollElement()
-            .then(() => this._scrollParents());
+            .then(() => this._scrollParents())
+            .then(() => this.scrollWasPerformed);
     }
 }

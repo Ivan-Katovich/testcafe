@@ -1,21 +1,28 @@
-const path            = require('path');
-const { PassThrough } = require('stream');
-const Module          = require('module');
-const fs              = require('fs');
-const del             = require('del');
-const OS              = require('os-family');
-const { expect }      = require('chai');
-const { noop }        = require('lodash');
-const correctFilePath = require('../../lib/utils/correct-file-path');
-const escapeUserAgent = require('../../lib/utils/escape-user-agent');
-const parseFileList   = require('../../lib/utils/parse-file-list');
-const TempDirectory   = require('../../lib/utils/temp-directory');
+const path                             = require('path');
+const { PassThrough }                  = require('stream');
+const EventEmitter                     = require('events');
+const Module                           = require('module');
+const fs                               = require('fs');
+const del                              = require('del');
+const OS                               = require('os-family');
+const { expect }                       = require('chai');
+const { noop }                         = require('lodash');
+const proxyquire                       = require('proxyquire');
+const sinon                            = require('sinon');
+const correctFilePath                  = require('../../lib/utils/correct-file-path');
+const escapeUserAgent                  = require('../../lib/utils/escape-user-agent');
+const parseFileList                    = require('../../lib/utils/parse-file-list');
+const TempDirectory                    = require('../../lib/utils/temp-directory');
 const { getConcatenatedValuesString }  = require('../../lib/utils/string');
-const getCommonPath            = require('../../lib/utils/get-common-path');
-const resolvePathRelativelyCwd = require('../../lib/utils/resolve-path-relatively-cwd');
-const getFilterFn              = require('../../lib/utils/get-filter-fn');
-const prepareReporters         = require('../../lib/utils/prepare-reporters');
+const getCommonPath                    = require('../../lib/utils/get-common-path');
+const resolvePathRelativelyCwd         = require('../../lib/utils/resolve-path-relatively-cwd');
+const getFilterFn                      = require('../../lib/utils/get-filter-fn');
+const prepareReporters                 = require('../../lib/utils/prepare-reporters');
 const { replaceLeadingSpacesWithNbsp } = require('../../lib/errors/test-run/utils');
+const createTempProfile                = require('../../lib/browser/provider/built-in/dedicated/chrome/create-temp-profile');
+const parseUserAgent                   = require('../../lib/utils/parse-user-agent');
+const diff                             = require('../../lib/utils/diff');
+
 
 const {
     buildChromeArgs,
@@ -32,6 +39,102 @@ describe('Utils', () => {
 
     it('Escape user agent', () => {
         expect(escapeUserAgent('Chrome 67.0.3396 / Windows 8.1.0.0')).eql('Chrome_67.0.3396_Windows_8.1.0.0');
+    });
+
+    it('Diff', () => {
+        expect(diff(null, null)).eql({});
+        expect(diff(void 0, void 0)).eql({});
+        expect(diff(1, 2)).eql({});
+        expect(diff({ a: void 0 }, { b: void 0 })).eql({});
+        expect(diff({ a: null }, { b: null })).eql({});
+        expect(diff({ a: null }, { a: 1 })).eql({ a: 1 });
+        expect(diff({ a: 1 }, { a: 1 })).eql({});
+        expect(diff({ a: 1 }, { a: void 0 })).eql({ a: void 0 });
+        expect(diff({ a: 1 }, { a: null })).eql({ a: null });
+        expect(diff({ a: 1, b: 1 }, { a: 1, b: 1 })).eql({});
+        expect(diff({ a: 1, b: {} }, { a: 1, b: {} })).eql({});
+        expect(diff({ a: 1, b: { c: 3 } }, { a: 1, b: { c: 3 } })).eql({});
+        expect(diff({ a: 1, b: { c: { d: 4 } } }, { a: 1, b: { c: { d: 4 } } })).eql({});
+        expect(diff({ a: 0 }, { a: 1 })).eql({ a: 1 });
+        expect(diff({ a: 1 }, { a: 0 })).eql({ a: 0 });
+        expect(diff({ a: 1 }, { a: 2 })).eql({ a: 2 });
+        expect(diff({ a: 1, b: 1 }, { a: 1, b: 2 })).eql({ b: 2 });
+        expect(diff({ a: 1, b: { c: 3 } }, { a: 1, b: { c: 4 } })).eql({ b: { c: 4 } });
+        expect(diff({ a: 1, b: { c: 3 } }, { a: 2, b: { c: 4 } })).eql({ a: 2, b: { c: 4 } });
+        expect(diff({ a: 1, b: { c: { d: 4 } } }, { a: 1, b: { c: { d: 5 } } })).eql({ b: { c: { d: 5 } } });
+    });
+
+    it('Parse user agent', () => {
+        const expectedEmptyParsedUA = {
+            name:            'Other',
+            version:         '0.0',
+            platform:        'other',
+            os:              { name: 'Other', version: '0.0' },
+            engine:          { name: 'Other', version: '0.0' },
+            prettyUserAgent: 'Other 0.0 / Other 0.0',
+            userAgent:       ''
+        };
+
+        const testCases = [
+            {
+                sourceUA: '',
+                expected: expectedEmptyParsedUA
+            },
+            {
+                sourceUA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.70 Safari/537.36',
+                expected: {
+                    name:            'Chrome',
+                    version:         '78.0.3904.70',
+                    platform:        'desktop',
+                    os:              { name: 'Windows', version: '10' },
+                    engine:          { name: 'Blink', version: '0.0' },
+                    prettyUserAgent: 'Chrome 78.0.3904.70 / Windows 10',
+                    userAgent:       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.70 Safari/537.36'
+                }
+            },
+            {
+                sourceUA: 'Mozilla/5.0 (iPad; CPU OS 12_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1 Mobile/15E148 Safari/604.1',
+                expected: {
+                    name:            'Safari',
+                    version:         '12.1',
+                    platform:        'tablet',
+                    os:              { name: 'iOS', version: '12.2' },
+                    engine:          { name: 'WebKit', version: '605.1.15' },
+                    prettyUserAgent: 'Safari 12.1 / iOS 12.2',
+                    userAgent:       'Mozilla/5.0 (iPad; CPU OS 12_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1 Mobile/15E148 Safari/604.1'
+                }
+            },
+            {
+                sourceUA: 'Mozilla/5.0 (Linux; Android 8.1.0; Android SDK built for x86 Build/OSM1.180201.026) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Mobile Safari/537.36',
+                expected: {
+                    name:            'Chrome',
+                    version:         '67.0.3396.87',
+                    platform:        'mobile',
+                    os:              { name: 'Android', version: '8.1.0' },
+                    engine:          { name: 'Blink', version: '0.0' },
+                    prettyUserAgent: 'Chrome 67.0.3396.87 / Android 8.1.0',
+                    userAgent:       'Mozilla/5.0 (Linux; Android 8.1.0; Android SDK built for x86 Build/OSM1.180201.026) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Mobile Safari/537.36'
+                }
+            },
+            {
+                sourceUA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.130 Electron/7.1.7 Safari/537.36',
+                expected: {
+                    name:            'Electron',
+                    version:         '7.1.7',
+                    platform:        'desktop',
+                    os:              { name: 'Windows', version: '10' },
+                    engine:          { name: 'Blink', version: '0.0' },
+                    prettyUserAgent: 'Electron 7.1.7 / Windows 10',
+                    userAgent:       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.130 Electron/7.1.7 Safari/537.36'
+                }
+            }
+        ];
+
+        testCases.forEach(testCase => {
+            expect(parseUserAgent(testCase.sourceUA)).to.deep.eql(testCase.expected);
+        });
+
+        expect(parseUserAgent()).to.deep.eql(expectedEmptyParsedUA);
     });
 
     describe('Parse file list', () => {
@@ -148,6 +251,50 @@ describe('Utils', () => {
                     expect(subDirs.length).eql(0);
                 });
         });
+
+        describe('Cleanup Process', () => {
+            const origArgv0 = process.argv[0];
+
+            beforeEach(() => {
+                process.argv[0] = origArgv0;
+            });
+
+            afterEach(() => {
+                process.argv[0] = origArgv0;
+            });
+
+            it('Should always start a subprocess using the correct Node.js path (GH-4276)', async () => {
+                class FakeChildProcess extends EventEmitter {
+                    constructor () {
+                        super();
+
+                        this.unref         = noop;
+                        this.stdout        = new PassThrough();
+                        this.stdout.unref  = noop;
+                        this.stderr        = new PassThrough();
+                        this.stderr.unref  = noop;
+                        this.channel       = new EventEmitter();
+                        this.channel.unref = noop;
+
+                        this.on('newListener', () => process.nextTick(() => this.emit('exit')));
+                    }
+                }
+
+                const fakeSpawn = sinon.stub().returns(new FakeChildProcess());
+
+                process.argv[0] = 'wrong path';
+
+                const cleanupProcess = proxyquire('../../lib/utils/temp-directory/cleanup-process', {
+                    'child_process': {
+                        spawn: fakeSpawn
+                    }
+                });
+
+                await cleanupProcess.init();
+
+                expect(fakeSpawn.args[0][0]).contains('node');
+            });
+        });
     });
 
     it('Replace leading spaces with &nbsp', () => {
@@ -218,8 +365,10 @@ describe('Utils', () => {
     });
 
     it('Get concatenated values string', () => {
-        expect(getConcatenatedValuesString(['param_1'])).eql('"param_1"');
-        expect(getConcatenatedValuesString(['param_1', 'param_2', 'param_3'])).eql('"param_1", "param_2", "param_3"');
+        expect(getConcatenatedValuesString([1])).eql('"1"');
+        expect(getConcatenatedValuesString(['1', '2'])).eql('"1" and "2"');
+        expect(getConcatenatedValuesString([1, 2, 3])).eql('"1", "2", and "3"');
+        expect(getConcatenatedValuesString([1, 2], '\n')).eql('"1"\n"2"');
     });
 
     describe('Moment Module Loader', () => {
@@ -398,5 +547,38 @@ describe('Utils', () => {
         expect(inDockerFlagMatch.length).eql(1);
         inDockerFlagMatch = chromeArgs.match(DISABLE_DEV_SHM_USAGE_RE);
         expect(inDockerFlagMatch.length).eql(1);
+    });
+
+    describe('Create temporary profile for the Google Chrome browser', () => {
+        const TMP_ROOT     = resolvePathRelativelyCwd('__tmp__');
+        const savedTmpRoot = TempDirectory.TEMP_DIRECTORIES_ROOT;
+
+        beforeEach(() => {
+            TempDirectory.TEMP_DIRECTORIES_ROOT = TMP_ROOT;
+
+            return del(TMP_ROOT);
+        });
+
+        afterEach(() => {
+            TempDirectory.TEMP_DIRECTORIES_ROOT = savedTmpRoot;
+
+            return del(TMP_ROOT);
+        });
+
+        it("Without 'disableMultipleWindows' option", async () => {
+            const tempDir     = await createTempProfile('testhost', false);
+            const profileFile = path.join(tempDir.path, 'Default', 'Preferences');
+            const preferences = JSON.parse(fs.readFileSync(profileFile));
+
+            expect(preferences.profile.content_settings.exceptions.popups).eql({ 'testhost': { setting: 1 } });
+        });
+
+        it("With 'disableMultipleWindows' option", async () => {
+            const tempDir     = await createTempProfile('testhost', true);
+            const profileFile = path.join(tempDir.path, 'Default', 'Preferences');
+            const preferences = JSON.parse(fs.readFileSync(profileFile));
+
+            expect(preferences.profile.content_settings.exceptions.popups).to.be.undefined;
+        });
     });
 });

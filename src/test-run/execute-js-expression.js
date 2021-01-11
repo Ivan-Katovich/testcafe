@@ -1,63 +1,95 @@
-import { createContext, runInContext } from 'vm';
-import SelectorBuilder from '../client-functions/selectors/selector-builder';
-import ClientFunctionBuilder from '../client-functions/client-function-builder';
+import { runInContext } from 'vm';
+import {
+    GeneralError,
+    TestCompilationError,
+    APIError,
+    CompositeError
+} from '../errors/runtime';
+import { UncaughtErrorInCustomScript, UncaughtTestCafeErrorInCustomScript } from '../errors/test-run';
+import { setContextOptions } from '../api/test-controller/execution-context';
 
-const contextsInfo = [];
+const ERROR_LINE_COLUMN_REGEXP = /\[JS code\]:(\d+):(\d+)/;
+const ERROR_LINE_OFFSET        = -1;
 
-function getContextInfo (testRun) {
-    let contextInfo = contextsInfo.find(info => info.testRun === testRun);
+// NOTE: do not beautify this code since offsets for error lines and columns are coded here
+function wrapInAsync (expression) {
+    return '(async function() {\n' +
+           expression + ';\n' +
+           '});';
+}
 
-    if (!contextInfo) {
-        contextInfo = { testRun, context: createExecutionContext(testRun), options: {} };
+function getErrorLineColumn (err) {
+    if (err.isTestCafeError) {
+        if (!err.callsite)
+            return {};
 
-        contextsInfo.push(contextInfo);
+        const stackFrames = err.callsite.stackFrames || [];
+        const frameIndex  = err.callsite.callsiteFrameIdx;
+        const stackFrame  = stackFrames[frameIndex];
+
+        return stackFrame ? {
+            line:   stackFrame.getLineNumber(),
+            column: stackFrame.getColumnNumber()
+        } : {};
     }
 
-    return contextInfo;
+    const result = err.stack && err.stack.match(ERROR_LINE_COLUMN_REGEXP);
+
+    if (!result)
+        return {};
+
+    const line   = result[1] ? parseInt(result[1], 10) : void 0;
+    const column = result[2] ? parseInt(result[2], 10) : void 0;
+
+    return { line, column };
 }
 
-function getContext (testRun, options = {}) {
-    const contextInfo = getContextInfo(testRun);
-
-    contextInfo.options = options;
-
-    return contextInfo.context;
-}
-
-function createExecutionContext (testRun) {
-    const sandbox = {
-        Selector: (fn, options = {}) => {
-            const { skipVisibilityCheck, collectionMode } = getContextInfo(testRun).options;
-
-            if (skipVisibilityCheck)
-                options.visibilityCheck = false;
-
-            if (testRun && testRun.id)
-                options.boundTestRun = testRun;
-
-            if (collectionMode)
-                options.collectionMode = collectionMode;
-
-            const builder = new SelectorBuilder(fn, options, { instantiation: 'Selector' });
-
-            return builder.getFunction();
-        },
-
-        ClientFunction: (fn, options = {}) => {
-            if (testRun && testRun.id)
-                options.boundTestRun = testRun;
-
-            const builder = new ClientFunctionBuilder(fn, options, { instantiation: 'ClientFunction' });
-
-            return builder.getFunction();
-        }
+function createErrorFormattingOptions () {
+    return {
+        filename:   '[JS code]',
+        lineOffset: ERROR_LINE_OFFSET
     };
-
-    return createContext(sandbox);
 }
 
-export default function (expression, testRun, options) {
-    const context = getContext(testRun, options);
+function getExecutionContext (testController, options = {}) {
+    const context = testController.getExecutionContext();
 
-    return runInContext(expression, context, { displayErrors: false });
+    // TODO: Find a way to avoid this assignment
+    setContextOptions(context, options);
+
+    return context;
+}
+
+function isRuntimeError (err) {
+    return err instanceof GeneralError ||
+           err instanceof TestCompilationError ||
+           err instanceof APIError ||
+           err instanceof CompositeError;
+}
+
+export function executeJsExpression (expression, testRun, options) {
+    const context      = getExecutionContext(testRun.controller, options);
+    const errorOptions = createErrorFormattingOptions();
+
+    return runInContext(expression, context, errorOptions);
+}
+
+export async function executeAsyncJsExpression (expression, testRun, callsite) {
+    if (!expression || !expression.length)
+        return Promise.resolve();
+
+    const context      = getExecutionContext(testRun.controller);
+    const errorOptions = createErrorFormattingOptions(expression);
+
+    try {
+        return await runInContext(wrapInAsync(expression), context, errorOptions)();
+    }
+    catch (err) {
+        const { line, column } = getErrorLineColumn(err);
+
+        if (err.isTestCafeError || isRuntimeError(err))
+            throw new UncaughtTestCafeErrorInCustomScript(err, expression, line, column, callsite);
+
+        throw new UncaughtErrorInCustomScript(err, expression, line, column, callsite);
+    }
 }

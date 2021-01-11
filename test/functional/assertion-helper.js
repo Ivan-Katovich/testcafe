@@ -2,11 +2,11 @@ const expect          = require('chai').expect;
 const globby          = require('globby');
 const path            = require('path');
 const fs              = require('fs');
-const Promise         = require('pinkie');
 const { isFunction }  = require('lodash');
 const del             = require('del');
 const config          = require('./config.js');
 const { readPngFile } = require('../../lib/utils/promisified-functions');
+const parseUserAgent  = require('../../lib/utils/parse-user-agent');
 
 
 const SCREENSHOTS_PATH               = config.testScreenshotsDir;
@@ -63,6 +63,22 @@ function checkScreenshotFileCropped (filePath) {
                    hasPixel(png, RED_PIXEL, width - 1, height - 1) && hasPixel(png, RED_PIXEL, width - 50, height - 50) && hasPixel(png, GREEN_PIXEL, width - 51, height - 51) ||
                    hasPixel(png, RED_PIXEL, width - 1, 0) && hasPixel(png, RED_PIXEL, width - 50, 49) && hasPixel(png, GREEN_PIXEL, width - 51, 50) ||
                    hasPixel(png, RED_PIXEL, 0, height - 1) && hasPixel(png, RED_PIXEL, 49, height - 50) && hasPixel(png, GREEN_PIXEL, 50, height - 51);
+        });
+}
+
+function checkScreenshotFileFullPage (filePath) {
+    return readPngFile(filePath)
+        .then(function (png) {
+            const width  = png.width;
+            const height = png.height;
+
+            const expectedHeight = 5000;
+
+            return height === expectedHeight &&
+                hasPixel(png, RED_PIXEL, 0, 0) &&
+                hasPixel(png, RED_PIXEL, width - 1, height - 1) &&
+                hasPixel(png, GREEN_PIXEL, 0, height - 1) &&
+                hasPixel(png, GREEN_PIXEL, width - 1, 0);
         });
 }
 
@@ -220,19 +236,21 @@ exports.isScreenshotDirExists = function () {
     return isDirExists(SCREENSHOTS_PATH);
 };
 
-exports.checkScreenshotsCreated = function ({ forError, customPath, screenshotsCount, runDirCount, browsersCount }) {
+exports.checkScreenshotsCreated = function ({ forError, customPath, screenshotsCount, runDirCount, browsersCount, baseDir }) {
     const expectedSubDirCount     = browsersCount || config.browsers.length;
     const expectedScreenshotCount = screenshotsCount || 2;
 
-    if (!isDirExists(SCREENSHOTS_PATH))
+    baseDir = baseDir || SCREENSHOTS_PATH;
+
+    if (!isDirExists(baseDir))
         return false;
 
-    const taskDirs = fs.readdirSync(SCREENSHOTS_PATH);
+    const taskDirs = fs.readdirSync(baseDir);
 
     if (!taskDirs || !taskDirs[0] || taskDirs.length !== 1)
         return false;
 
-    const taskDirPath = path.join(SCREENSHOTS_PATH, taskDirs[0]);
+    const taskDirPath = path.join(baseDir, taskDirs[0]);
 
     if (customPath) {
         const customDirExists = taskDirPath.includes(customPath);
@@ -286,6 +304,10 @@ exports.checkScreenshotIsNotWhite = function (forError, customPath) {
     return checkScreenshotImages(forError, customPath, checkScreenshotFileIsNotWhite);
 };
 
+exports.checkScreenshotFileFullPage = function (forError, customPath) {
+    return checkScreenshotImages(forError, customPath, checkScreenshotFileFullPage);
+};
+
 exports.isScreenshotsEqual = function (customPath, referenceImagePathGetter) {
     return checkScreenshotImages(false, customPath, function (screenshotFilePath) {
         const screenshotContent = fs.readFileSync(screenshotFilePath);
@@ -316,7 +338,7 @@ function removeDir (dirPath) {
     return Promise.resolve();
 }
 
-exports.removeScreenshotDir = () => removeDir(SCREENSHOTS_PATH);
+exports.removeScreenshotDir = (dir = SCREENSHOTS_PATH) => removeDir(dir);
 
 exports.removeVideosDir = () => removeDir(VIDEOS_PATH);
 
@@ -324,7 +346,29 @@ exports.getVideoFilesList = () => {
     return globby(VIDEO_FILES_GLOB, { nodir: true });
 };
 
+exports.checkUserAgent = function (errs, alias) {
+    const isErrorsArray = config.currentEnvironment.browsers.length === 1 && Array.isArray(errs);
+
+    if (!isErrorsArray)
+        errs = errs[alias];
+
+    if (!isErrorsArray && !errs)
+        throw new Error('Error for "' + alias + '" haven\'t created');
+
+    const parsedUA = parseUserAgent(errs[0]);
+    const prettyUA = parsedUA.prettyUserAgent.toLowerCase();
+
+    // NOTE: the "ie" alias corresponds to the "internet explorer" lowered part of a compact user agent string (GH-481)
+    const expectedBrowserName = alias === 'ie' ? 'internet explorer' : alias;
+
+    expect(prettyUA.indexOf(expectedBrowserName)).eql(0, prettyUA + ' doesn\'t start with "' + expectedBrowserName + '"');
+};
+
 exports.SCREENSHOTS_PATH = SCREENSHOTS_PATH;
 
 exports.THUMBNAILS_DIR_NAME = THUMBNAILS_DIR_NAME;
 
+exports.hasPixel = hasPixel;
+
+exports.GREEN_PIXEL = GREEN_PIXEL;
+exports.RED_PIXEL   = RED_PIXEL;

@@ -26,30 +26,34 @@
         '    referer : "{{{referer}}}",',
         '    cookie: "{{{cookie}}}",',
         '    serviceMsgUrl : "{{{serviceMsgUrl}}}",',
+        '    transportWorkerUrl: "{{{transportWorkerUrl}}}",',
         '    sessionId : "sessionId",',
         '    iframeTaskScriptTemplate: {{{iframeTaskScriptTemplate}}}',
         '});'
     ].join('');
 
-    window.getIframeTaskScript = function (referer, serviceMsgUrl, loc, cookie) {
+    window.getIframeTaskScript = function (referer, serviceMsgUrl, loc, cookie, transportWorkerUrl) {
         return iframeTaskScriptTempate
             .replace('{{{referer}}}', referer || '')
             .replace('{{{serviceMsgUrl}}}', serviceMsgUrl || '')
             .replace('{{{location}}}', loc || '')
-            .replace('{{{cookie}}}', cookie || '');
+            .replace('{{{cookie}}}', cookie || '')
+            .replace('{{{transportWorkerUrl}}}', transportWorkerUrl || '');
     };
 
-    window.initIFrameTestHandler = function (e) {
-        const referer          = location;
-        const serviceMsg       = '/service-msg/100';
-        const iframeTaskScript = window.getIframeTaskScript(referer, serviceMsg, location).replace(/"/g, '\\"');
+    window.initIFrameTestHandler = function (iframe) {
+        const referer            = location;
+        const serviceMsg         = '/service-msg/100';
+        const transportWorkerUrl = '/transport-worker.js';
+        const iframeTaskScript   = window.getIframeTaskScript(referer, serviceMsg, location, '', transportWorkerUrl).replace(/"/g, '\\"');
 
-        if (e.iframe.id.indexOf('test') !== -1) {
-            e.iframe.contentWindow.eval.call(e.iframe.contentWindow, [
+        if (iframe.id.indexOf('test') !== -1) {
+            iframe.contentWindow.eval.call(iframe.contentWindow, [
                 'window["%hammerhead%"].get("./utils/destination-location").forceLocation("' + location + '");',
                 'window["%hammerhead%"].start({',
                 '    referer : "' + referer + '",',
                 '    serviceMsgUrl : "' + serviceMsg + '",',
+                '    transportWorkerUrl: "' + transportWorkerUrl + '",',
                 '    iframeTaskScriptTemplate: "' + iframeTaskScript + '",',
                 '    sessionId : "sessionId"',
                 '});'
@@ -57,8 +61,7 @@
         }
     };
 
-    hammerhead.start({ sessionId: 'sessionId' });
-
+    hammerhead.start({ sessionId: 'sessionId', transportWorkerUrl: '/transport-worker.js' });
 
     //TestCafe setup
     const testCafeLegacyRunner = getTestCafeModule('testCafeLegacyRunner');
@@ -102,12 +105,12 @@
     // With this hack, we only allow setting the scroll by a script and prevent native browser scrolling.
     if (hammerhead.utils.browser.isIOS) {
         document.addEventListener('DOMContentLoaded', function () {
-            const originWindowScrollTo = window.scrollTo;
+            const originWindowScrollTo = hammerhead.nativeMethods.scrollTo;
 
             let lastScrollTop        = window.scrollY;
             let lastScrollLeft       = window.scrollX;
 
-            window.scrollTo = function () {
+            hammerhead.nativeMethods.scrollTo = function () {
                 lastScrollLeft = arguments[0];
                 lastScrollTop  = arguments[1];
 

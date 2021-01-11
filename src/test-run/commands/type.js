@@ -33,6 +33,14 @@ export default {
     maximizeWindow:             'maximize-window',
     switchToIframe:             'switch-to-iframe',
     switchToMainWindow:         'switch-to-main-window',
+    openWindow:                 'open-window',
+    closeWindow:                'close-window',
+    getCurrentWindow:           'get-current-window',
+    getCurrentWindows:          'get-current-windows',
+    switchToWindow:             'switch-to-window',
+    switchToWindowByPredicate:  'switch-to-window-by-predicate',
+    switchToParentWindow:       'switch-to-parent-window',
+    switchToPreviousWindow:     'switch-to-previous-window',
     setNativeDialogHandler:     'set-native-dialog-handler',
     getNativeDialogHistory:     'get-native-dialog-history',
     getBrowserConsoleMessages:  'get-browser-console-messages',
@@ -44,5 +52,7 @@ export default {
     testDone:                   'test-done',
     backupStorages:             'backup-storages',
     executeExpression:          'execute-expression',
-    unlockPage:                 'unlock-page'
+    executeAsyncExpression:     'execute-async-expression',
+    unlockPage:                 'unlock-page',
+    recorder:                   'recorder'
 };

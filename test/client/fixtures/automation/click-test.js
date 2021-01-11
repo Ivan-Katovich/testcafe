@@ -3,12 +3,12 @@ const browserUtils     = hammerhead.utils.browser;
 const featureDetection = hammerhead.utils.featureDetection;
 
 const testCafeCore = window.getTestCafeModule('testCafeCore');
-const styleUtils   = testCafeCore.get('./utils/style');
+const styleUtils   = testCafeCore.styleUtils;
 
 const testCafeAutomation = window.getTestCafeModule('testCafeAutomation');
 const getOffsetOptions   = testCafeAutomation.getOffsetOptions;
 const ClickAutomation    = testCafeAutomation.Click;
-const ClickOptions       = testCafeAutomation.get('../../test-run/commands/options').ClickOptions;
+const ClickOptions       = testCafeAutomation.ClickOptions;
 
 testCafeCore.preventRealEvents();
 
@@ -77,6 +77,37 @@ $(document).ready(function () {
 
     const removeTestElements = function () {
         $('.' + TEST_ELEMENT_CLASS).remove();
+    };
+
+    const preventEventAndClick = function (eventNameToPrevent) {
+        const raisedEvents = [];
+
+        const events = [
+            'ontouchstart',
+            'ontouchend',
+            'ontouchmove',
+            'onmousedown',
+            'onmousemove',
+            'onmouseup',
+            'onclick'
+        ];
+
+        events.forEach(function (eventName) {
+            $el[0][eventName] = function (e) {
+                if (eventName === eventNameToPrevent)
+                    e.preventDefault();
+
+                raisedEvents.push(eventName);
+            };
+        });
+
+        const click = new ClickAutomation($el[0], new ClickOptions());
+
+        return click
+            .run()
+            .then(function () {
+                return raisedEvents;
+            });
     };
 
     $('<div></div>').css({ width: 1, height: 1500, position: 'absolute' }).appendTo('body');
@@ -318,7 +349,7 @@ $(document).ready(function () {
             backgroundColor: '#ff0000'
         });
 
-        window.scrollTo(0, 5050);
+        hammerhead.nativeMethods.scrollTo.call(window, 0, 5050);
 
         const click = new ClickAutomation(target[0], {
             offsetX: 10,
@@ -364,7 +395,7 @@ $(document).ready(function () {
             height:          100
         });
 
-        window.scrollTo(0, 5050);
+        hammerhead.nativeMethods.scrollTo.call(window, 0, 5050);
 
         const click = new ClickAutomation(target[0], {
             offsetX: 10,
@@ -715,7 +746,78 @@ $(document).ready(function () {
             });
     });
 
+    if (!browserUtils.isIE) {
+        asyncTest('click and mouseup events should have equal `timeStamp` properties', function () {
+            const target = document.createElement('div');
+
+            target.className    = TEST_ELEMENT_CLASS;
+            target.style.width  = '10px';
+            target.style.height = '10px';
+
+            document.body.appendChild(target);
+
+            let mouseUpTimeStamp = null;
+            let clickTimeStamp   = null;
+
+            target.addEventListener('mouseup', function (e) {
+                mouseUpTimeStamp = e.timeStamp;
+            });
+
+            target.addEventListener('click', function (e) {
+                clickTimeStamp = e.timeStamp;
+            });
+
+            const clickAutomation = new ClickAutomation(target, { });
+
+            return clickAutomation
+                .run()
+                .then(function () {
+                    ok(typeof mouseUpTimeStamp === 'number');
+                    ok(typeof clickTimeStamp === 'number');
+
+                    equal(mouseUpTimeStamp, clickTimeStamp);
+
+                    startNext();
+                });
+        });
+    }
+
+
     module('regression');
+
+    asyncTest('GH-4709 - Fails to click on svg element', function () {
+        const div   = document.createElement('div');
+        let clicked = false;
+
+        div.innerHTML        = '<svg><circle cx=\'50\' cy=\'50\' r=\'40\' stroke=\'black\' stroke-width=\'3\' fill=\'red\'></circle></svg>';
+        div.className        = TEST_ELEMENT_CLASS;
+        div.style.paddingTop = '200px';
+
+        const svg = div.childNodes[0];
+
+        svg.style.width  = '80px';
+        svg.style.height = '80px';
+
+        document.body.appendChild(div);
+
+        svg.addEventListener('click', function () {
+            clicked = true;
+        });
+
+        const clickBody = new ClickAutomation(document.body, { offsetX: 1, offsetY: 1 });
+        const clickSvg  = new ClickAutomation(svg, { offsetX: 40, offsetY: 40 });
+
+        // NOTE: we need to move cursor to any element before the clicking on svg to reproduce the issue
+        clickBody
+            .run()
+            .then(function () {
+                return clickSvg.run();
+            })
+            .then(function () {
+                equal(clicked, true);
+                startNext();
+            });
+    });
 
     asyncTest('Q558721 - Test running hangs if element is hidden in non-scrollable container', function () {
         let clickRaised = false;
@@ -1078,6 +1180,56 @@ $(document).ready(function () {
 
                     startNext();
                 });
+        });
+
+        asyncTest('click should not raise touchmove', function () {
+            const raisedEvents = [];
+
+            const touchEventHandler = function (ev) {
+                raisedEvents.push(ev.type);
+            };
+
+            const element = $el[0];
+
+            document.body.addEventListener('touchmove', touchEventHandler);
+            element.addEventListener('touchmove', touchEventHandler);
+
+            element.addEventListener('touchstart', touchEventHandler);
+            element.addEventListener('touchend', touchEventHandler);
+
+            const click = new ClickAutomation(element, new ClickOptions());
+
+            click
+                .run()
+                .then(function () {
+                    deepEqual(raisedEvents, ['touchstart', 'touchend']);
+
+                    startNext();
+                });
+        });
+
+        asyncTest('mouse or click events should not be raised if touch events were cancelled', function () {
+            const expectedRaisedEvents = ['ontouchstart', 'ontouchend'];
+
+            window.async.series({
+                'ontouchstart': function (cb) {
+                    preventEventAndClick('ontouchstart')
+                        .then(function (actualRaisedEvents) {
+                            deepEqual(actualRaisedEvents, expectedRaisedEvents);
+
+                            cb();
+                        });
+                },
+
+                'ontouchend': function () {
+                    preventEventAndClick('ontouchend')
+                        .then(function (actualRaisedEvents) {
+                            deepEqual(actualRaisedEvents, expectedRaisedEvents);
+
+                            startNext();
+                        });
+                }
+            });
         });
     }
 });

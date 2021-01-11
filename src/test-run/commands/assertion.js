@@ -3,10 +3,13 @@ import CommandBase from './base';
 import { AssertionOptions } from './options';
 import { APIError } from '../../errors/runtime';
 import { AssertionExecutableArgumentError } from '../../errors/test-run';
-import executeJsExpression from '../execute-js-expression';
+import { executeJsExpression } from '../execute-js-expression';
 import { isJSExpression } from './utils';
-
-import { stringArgument, actionOptions, nonEmptyStringArgument } from './validations/argument';
+import {
+    stringArgument,
+    actionOptions,
+    nonEmptyStringArgument
+} from './validations/argument';
 
 // Initializers
 function initAssertionOptions (name, val) {

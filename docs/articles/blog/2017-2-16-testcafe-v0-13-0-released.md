@@ -109,13 +109,13 @@ test(`Test Speed`, async t => {
 
 ### ⚙ Using test controller outside of test code ([#1166](https://github.com/DevExpress/testcafe/issues/1166))
 
-You may sometimes need to call test API from outside of test code. For instance, your [page model](https://devexpress.github.io/testcafe/documentation/recipes/using-page-model.html)
+You may sometimes need to call test API from outside of test code. For instance, your [page model](../documentation/guides/concepts/page-model.md)
 can contain methods that perform common operations used in many tests, like authentication.
 
 ```js
 import { Selector } from 'testcafe';
 
-export default class Page {
+class Page {
     constructor () {
         this.loginInput    = Selector('#login');
         this.passwordInput = Selector('#password');
@@ -128,6 +128,8 @@ export default class Page {
             .click(this.signInButton);
     }
 }
+
+export default new Page();
 ```
 
 In this instance, you need to access the test controller from the page model's `login` method.
@@ -138,7 +140,7 @@ Instead, you can simply import `t` to the page model file.
 ```js
 import { Selector, t } from 'testcafe';
 
-export default class Page {
+class Page {
     constructor () {
         this.loginInput    = Selector('#login');
         this.passwordInput = Selector('#password');
@@ -151,6 +153,8 @@ export default class Page {
             .click(this.signInButton);
     }
 }
+
+export default new Page();
 ```
 
 TestCafe will implicitly resolve test context and provide the right test controller.
@@ -197,9 +201,9 @@ const id = await t.select('.someClass').id;
 const id = await Selector('.someClass').id;
 ```
 
-* `selectorOptions.index` - use [selector.nth()](https://devexpress.github.io/testcafe/documentation/test-api/selecting-page-elements/selectors/functional-style-selectors.html#nth) instead.
-* `selectorOptions.text` - use [selector.withText()](https://devexpress.github.io/testcafe/documentation/test-api/selecting-page-elements/selectors/functional-style-selectors.html#withtext) instead.
-* `selectorOptions.dependencies` - use [filtering](https://devexpress.github.io/testcafe/documentation/test-api/selecting-page-elements/selectors/functional-style-selectors.html#filter-dom-nodes) and [hierarchical](https://devexpress.github.io/testcafe/documentation/test-api/selecting-page-elements/selectors/functional-style-selectors.html#search-for-elements-in-the-dom-hierarchy) methods to build combined selectors instead.
+* `selectorOptions.index` - use [selector.nth()](../documentation/reference/test-api/selector/nth.md) instead.
+* `selectorOptions.text` - use [selector.withText()](../documentation/reference/test-api/selector/withtext.md) instead.
+* `selectorOptions.dependencies` - use [filtering and hierarchical](../documentation/guides/basic-guides/select-page-elements.md#member-tables) methods to build combined selectors instead.
 
 ## Bug Fixes
 

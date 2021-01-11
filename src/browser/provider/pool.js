@@ -1,4 +1,3 @@
-import Promise from 'pinkie';
 import BUILT_IN_PROVIDERS from './built-in';
 import BrowserProviderPluginHost from './plugin-host';
 import parseProviderName from './parse-provider-name';
@@ -70,14 +69,19 @@ export default {
 
     _getProviderModule (providerName, moduleName) {
         try {
-            const providerObject = require(moduleName);
-
-            this.addProvider(providerName, providerObject);
-            return this._getProviderFromCache(providerName);
+            // First, just check if the module exists
+            require.resolve(moduleName);
         }
         catch (e) {
+            // Module does not exist. Return null, and let the caller handle
             return null;
         }
+
+        // Load the module
+        const providerObject = require(moduleName);
+
+        this.addProvider(providerName, providerObject);
+        return this._getProviderFromCache(providerName);
     },
 
     _getProviderFromCache (providerName) {
@@ -108,6 +112,9 @@ export default {
 
         if (!await provider.isValidBrowserName(browserName))
             throw new GeneralError(RUNTIME_ERRORS.cannotFindBrowser, alias);
+
+        if (typeof alias !== 'string')
+            alias = JSON.stringify(alias);
 
         return { alias, ...browserInfo };
     },

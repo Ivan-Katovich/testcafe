@@ -7,7 +7,7 @@ const multer                = require('multer');
 const Mustache              = require('mustache');
 const readFile              = require('../../../lib/utils/promisified-functions').readFile;
 const quarantineModeTracker = require('../quarantine-mode-tracker');
-const useragent             = require('useragent');
+const parseUserAgent        = require('../../../lib/utils/parse-user-agent');
 
 const storage = multer.memoryStorage();
 const upload  = multer({ storage: storage });
@@ -16,7 +16,9 @@ const CONTENT_TYPES = {
     '.js':   'application/javascript',
     '.css':  'text/css',
     '.html': 'text/html',
-    '.png':  'image/png'
+    '.png':  'image/png',
+    '.zip':  'application/zip',
+    '.pdf':  'application/pdf'
 };
 
 const NON_CACHEABLE_PAGES = [
@@ -28,6 +30,9 @@ const NON_CACHEABLE_PAGES = [
 
 const UPLOAD_SUCCESS_PAGE_TEMPLATE = readSync('./views/upload-success.html.mustache');
 
+const shouldCachePage = function (reqUrl) {
+    return NON_CACHEABLE_PAGES.every(pagePrefix => !reqUrl.startsWith(pagePrefix));
+};
 
 const Server = module.exports = function (port, basePath) {
     const server = this;
@@ -59,9 +64,35 @@ Server.prototype._setupRoutes = function () {
     });
 
     this.app.get('/get-browser-name', function (req, res) {
-        const agent = useragent.parse(req.headers['user-agent']);
+        const parsedUA = parseUserAgent(req.headers['user-agent']);
 
-        res.end(agent.family);
+        res.end(parsedUA.name);
+    });
+
+    this.app.get('/i4855', (req, res) => {
+        res.send(`
+            <html>
+                <body>
+                    <script>
+                        var driver = window['%testCafeDriverInstance%'];
+
+                        function closeWindowAfter1Sec () {
+                            window.setTimeout(() =>{
+                                window.close();
+                            }, 1000);
+                        }
+
+                        driver._onExecuteSelectorCommand = function () {
+                            closeWindowAfter1Sec();
+                        };
+
+                        driver._onExecuteClientFunctionCommand = function() {
+                            closeWindowAfter1Sec();
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
     });
 
     this.app.get('*', function (req, res) {
@@ -73,7 +104,7 @@ Server.prototype._setupRoutes = function () {
             .then(function (content) {
                 res.setHeader('content-type', CONTENT_TYPES[path.extname(resourcePath)]);
 
-                if (NON_CACHEABLE_PAGES.every(pagePrefix => !reqPath.startsWith(pagePrefix)))
+                if (shouldCachePage(reqPath))
                     res.setHeader('cache-control', 'max-age=3600');
 
                 setTimeout(function () {
@@ -102,6 +133,19 @@ Server.prototype._setupRoutes = function () {
     this.app.post('/set-token/', function (req, res) {
         res.setHeader('set-cookie', 'token=' + req.body.token);
         res.redirect(req.headers['referer']);
+    });
+
+    this.app.post('/set-token-and-close', (req, res) => {
+        res.setHeader('set-cookie', 'token=' + req.body.token);
+        res.send(`
+            <html>
+                <body>
+                    <script>
+                        window.close();
+                    </script>
+                </body>
+            </html>
+        `);
     });
 
     this.app.post('/file-upload', upload.any(), function (req, res) {

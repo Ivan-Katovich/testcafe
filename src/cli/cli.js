@@ -70,7 +70,18 @@ async function runTests (argParser) {
 
     log.showSpinner();
 
-    const testCafe = await createTestCafe(opts.hostname, port1, port2, opts.ssl, opts.dev);
+    const { hostname, ssl, dev, experimentalCompilerService, retryTestPages } = opts;
+
+    const testCafe = await createTestCafe({
+        developmentMode: dev,
+
+        hostname,
+        port1,
+        port2,
+        ssl,
+        experimentalCompilerService,
+        retryTestPages
+    });
 
     const correctedBrowsersAndSources = await correctBrowsersAndSources(argParser, testCafe.configuration);
     const automatedBrowsers           = correctedBrowsersAndSources.browsers;
@@ -82,24 +93,28 @@ async function runTests (argParser) {
 
     let failed = 0;
 
-
     runner.isCli = true;
 
     runner
         .useProxy(proxy, proxyBypass)
         .src(sources)
+        .tsConfigPath(argParser.opts.tsConfigPath)
         .browsers(browsers)
         .reporter(argParser.opts.reporter)
         .concurrency(argParser.opts.concurrency)
-        .filter(argParser.filter)
+        .filter(argParser.opts.filter)
         .video(opts.video, opts.videoOptions, opts.videoEncodingOptions)
-        .screenshots(opts.screenshots, opts.screenshotsOnFails, opts.screenshotPathPattern)
-        .startApp(opts.app, opts.appInitDelay);
+        .screenshots(opts.screenshots)
+        .startApp(opts.app, opts.appInitDelay)
+        .clientScripts(argParser.opts.clientScripts)
+        .compilerOptions(argParser.opts.compilerOptions);
 
     runner.once('done-bootstrapping', () => log.hideSpinner());
 
     try {
-        failed = await runner.run(opts);
+        const runOpts = argParser.getRunOptions();
+
+        failed = await runner.run(runOpts);
     }
 
     finally {
@@ -110,7 +125,7 @@ async function runTests (argParser) {
     exit(failed);
 }
 
-async function listBrowsers (providerName = 'locally-installed') {
+async function listBrowsers (providerName) {
     const provider = await browserProviderPool.getProvider(providerName);
 
     if (!provider)

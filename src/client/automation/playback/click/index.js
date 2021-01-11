@@ -12,6 +12,7 @@ const extend           = hammerhead.utils.extend;
 const browserUtils     = hammerhead.utils.browser;
 const featureDetection = hammerhead.utils.featureDetection;
 const eventSimulator   = hammerhead.eventSandbox.eventSimulator;
+const listeners        = hammerhead.eventSandbox.listeners;
 
 const domUtils   = testCafeCore.domUtils;
 const eventUtils = testCafeCore.eventUtils;
@@ -33,7 +34,9 @@ export default class ClickAutomation extends VisibleElementAutomation {
             mousedownPrevented:      false,
             blurRaised:              false,
             simulateDefaultBehavior: true,
-            clickElement:            null
+            clickElement:            null,
+            touchStartCancelled:     false,
+            touchEndCancelled:       false
         };
     }
 
@@ -56,11 +59,17 @@ export default class ClickAutomation extends VisibleElementAutomation {
         eventUtils.bind(element, 'blur', onblur, true);
     }
 
+    // NOTE:
+    // If `touchstart`, `touchmove`, or `touchend` are canceled, we should not dispatch any mouse event
+    // that would be a consequential result of the prevented touch event
+    _isTouchEventWasCancelled () {
+        return this.eventState.touchStartCancelled || this.eventState.touchEndCancelled;
+    }
 
     _raiseTouchEvents (eventArgs) {
         if (featureDetection.isTouchDevice) {
-            eventSimulator.touchstart(eventArgs.element, eventArgs.options);
-            eventSimulator.touchend(eventArgs.element, eventArgs.options);
+            this.eventState.touchStartCancelled = !eventSimulator.touchstart(eventArgs.element, eventArgs.options);
+            this.eventState.touchEndCancelled   = !eventSimulator.touchend(eventArgs.element, eventArgs.options);
         }
     }
 
@@ -86,7 +95,8 @@ export default class ClickAutomation extends VisibleElementAutomation {
 
                 this._bindBlurHandler(activeElement);
 
-                this.eventState.simulateDefaultBehavior = eventSimulator.mousedown(eventArgs.element, eventArgs.options);
+                if (!this._isTouchEventWasCancelled())
+                    this.eventState.simulateDefaultBehavior = eventSimulator.mousedown(eventArgs.element, eventArgs.options);
 
                 if (this.eventState.simulateDefaultBehavior === false)
                     this.eventState.simulateDefaultBehavior = needCloseSelectDropDown && !this.eventState.mousedownPrevented;
@@ -177,14 +187,30 @@ export default class ClickAutomation extends VisibleElementAutomation {
                 this.eventState.clickElement = ClickAutomation._getElementForClick(this.mouseDownElement, element,
                     this.targetElementParentNodes);
 
-                eventSimulator.mouseup(element, eventArgs.options);
+
+                let timeStamp = {};
+
+                const getTimeStamp = e => {
+                    timeStamp = e.timeStamp;
+
+                    listeners.removeInternalEventListener(window, ['mouseup'], getTimeStamp);
+                };
+
+                if (!browserUtils.isIE)
+                    listeners.addInternalEventListener(window, ['mouseup'], getTimeStamp);
+
+                if (!this._isTouchEventWasCancelled())
+                    eventSimulator.mouseup(element, eventArgs.options);
+
+                return { timeStamp };
             });
     }
 
     _click (eventArgs) {
         const clickCommand = createClickCommand(this.eventState, eventArgs);
 
-        clickCommand.run();
+        if (!this._isTouchEventWasCancelled())
+            clickCommand.run();
 
         return eventArgs;
     }
@@ -212,6 +238,10 @@ export default class ClickAutomation extends VisibleElementAutomation {
                 return Promise.all([delay(this.automationSettings.mouseActionStepDelay), this._mousedown(eventArgs)]);
             })
             .then(() => this._mouseup(eventArgs))
-            .then(() => this._click(eventArgs));
+            .then(({ timeStamp }) => {
+                eventArgs.options.timeStamp = timeStamp;
+
+                return this._click(eventArgs);
+            });
     }
 }

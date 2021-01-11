@@ -2,11 +2,22 @@ const expect                  = require('chai').expect;
 const TYPE                    = require('../../lib/test-run/commands/type');
 const createCommandFromObject = require('../../lib/test-run/commands/from-object');
 const SelectorBuilder         = require('../../lib/client-functions/selectors/selector-builder');
-const assertThrow             = require('./helpers/assert-error').assertThrow;
+const assertThrow             = require('./helpers/assert-runtime-error').assertThrow;
+const TestController          = require('../../lib/api/test-controller');
+
+const testRunMock = {
+    test: {
+        testFile: {
+            filename: ''
+        }
+    }
+};
+
+testRunMock.controller = new TestController(testRunMock);
 
 function createCommand (obj) {
     try {
-        return createCommandFromObject(obj, {});
+        return createCommandFromObject(obj, testRunMock);
     }
     catch (e) {
         // TODO: add an assertion for APIError
@@ -757,7 +768,8 @@ describe('Test run commands', () => {
             const commandObj = {
                 type:          TYPE.navigateTo,
                 url:           'localhost',
-                stateSnapshot: 'stateSnapshot'
+                stateSnapshot: 'stateSnapshot',
+                forceReload:   true
             };
 
             const command = createCommand(commandObj);
@@ -765,7 +777,8 @@ describe('Test run commands', () => {
             expect(JSON.parse(JSON.stringify(command))).eql({
                 type:          TYPE.navigateTo,
                 url:           'localhost',
-                stateSnapshot: 'stateSnapshot'
+                stateSnapshot: 'stateSnapshot',
+                forceReload:   true
             });
         });
 
@@ -834,6 +847,7 @@ describe('Test run commands', () => {
                 selector: '#yo',
                 path:     'custom',
                 dummy:    'test',
+                fullPage: true,
 
                 options: {
                     dummy: 'yo'
@@ -846,13 +860,15 @@ describe('Test run commands', () => {
                 type:     TYPE.takeScreenshot,
                 markData: '',
                 markSeed: null,
-                path:     'custom'
+                path:     'custom',
+                fullPage: true
             });
 
             commandObj = {
                 type:     TYPE.takeScreenshot,
                 selector: '#yo',
                 dummy:    'test',
+                fullPage: void 0,
 
                 options: {
                     dummy: 'yo'
@@ -1080,7 +1096,6 @@ describe('Test run commands', () => {
                 type: TYPE.executeExpression,
 
                 expression:         'js-expression',
-                isAsyncExpression:  true,
                 resultVariableName: 'variable'
             };
 
@@ -1090,7 +1105,6 @@ describe('Test run commands', () => {
                 type: TYPE.executeExpression,
 
                 expression:         'js-expression',
-                isAsyncExpression:  true,
                 resultVariableName: 'variable'
             });
 
@@ -1105,7 +1119,6 @@ describe('Test run commands', () => {
                 type: TYPE.executeExpression,
 
                 expression:         'js-expression',
-                isAsyncExpression:  false,
                 resultVariableName: null
             });
         });
@@ -1166,6 +1179,46 @@ describe('Test run commands', () => {
                 options: {
                     allowUnawaitedPromise: false
                 }
+            });
+        });
+
+        it('Should create RecorderCommand from object', function () {
+            let commandObj = {
+                type:    TYPE.recorder,
+                subtype: 'test',
+
+                options: {
+                    dummy: 'yo'
+                }
+            };
+
+            let command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:    TYPE.recorder,
+                subtype: 'test',
+
+                forceExecutionInTopWindowOnly: false
+            });
+
+            commandObj = {
+                type:    TYPE.recorder,
+                subtype: 'test',
+
+                forceExecutionInTopWindowOnly: true,
+
+                options: {
+                    dummy: 'yo'
+                }
+            };
+
+            command = createCommand(commandObj);
+
+            expect(JSON.parse(JSON.stringify(command))).eql({
+                type:    TYPE.recorder,
+                subtype: 'test',
+
+                forceExecutionInTopWindowOnly: true
             });
         });
     });
@@ -2913,26 +2966,8 @@ describe('Test run commands', () => {
             assertThrow(
                 function () {
                     return createCommand({
-                        type:              TYPE.executeExpression,
-                        expression:        'js-expression',
-                        isAsyncExpression: 123
-                    });
-                },
-                {
-                    isTestCafeError: true,
-                    code:            'E15',
-                    actualValue:     'number',
-                    argumentName:    'isAsyncExpression',
-                    callsite:        null
-                }
-            );
-
-            assertThrow(
-                function () {
-                    return createCommand({
                         type:               TYPE.executeExpression,
                         expression:         'js-expression',
-                        isAsyncExpression:  true,
                         resultVariableName: 123
                     });
                 },
@@ -2950,7 +2985,6 @@ describe('Test run commands', () => {
                     return createCommand({
                         type:               TYPE.executeExpression,
                         expression:         'js-expression',
-                        isAsyncExpression:  true,
                         resultVariableName: ''
                     });
                 },
@@ -2959,6 +2993,39 @@ describe('Test run commands', () => {
                     code:            'E16',
                     argumentName:    'resultVariableName',
                     actualValue:     '""',
+                    callsite:        null
+                }
+            );
+        });
+
+        it('Should validate ExecuteAsyncExpressionCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.executeAsyncExpression
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E16',
+                    argumentName:    'expression',
+                    actualValue:     'undefined',
+                    callsite:        null
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:       TYPE.executeAsyncExpression,
+                        expression: 123
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E16',
+                    argumentName:    'expression',
+                    actualValue:     'number',
                     callsite:        null
                 }
             );
@@ -3005,6 +3072,55 @@ describe('Test run commands', () => {
 
                     callsite:    null,
                     originError: null
+                }
+            );
+        });
+
+        it('Should validate RecorderCommand', function () {
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type: TYPE.recorder
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E16',
+                    argumentName:    'subtype',
+                    actualValue:     'undefined',
+                    callsite:        null
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.recorder,
+                        subtype: ''
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E16',
+                    argumentName:    'subtype',
+                    actualValue:     '""',
+                    callsite:        null
+                }
+            );
+
+            assertThrow(
+                function () {
+                    return createCommand({
+                        type:    TYPE.recorder,
+                        subtype: 2
+                    });
+                },
+                {
+                    isTestCafeError: true,
+                    code:            'E16',
+                    argumentName:    'subtype',
+                    actualValue:     'number',
+                    callsite:        null
                 }
             );
         });

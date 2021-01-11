@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import debug from 'debug';
 import promisifyEvent from 'promisify-event';
-import Promise from 'pinkie';
 import { sendMessageToChildProcess } from '../../promisified-functions';
 import COMMANDS from './commands';
 
@@ -120,7 +119,7 @@ class CleanupProcess {
                 if (initialized !== void 0)
                     return initialized;
 
-                this.worker = spawn(process.argv[0], [WORKER_PATH], { detached: true, stdio: WORKER_STDIO_CONFIG });
+                this.worker = spawn(process.argv0, [WORKER_PATH], { detached: true, stdio: WORKER_STDIO_CONFIG });
 
                 this._setupWorkerEventHandlers();
                 this._unrefWorkerProcess();

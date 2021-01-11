@@ -1,5 +1,7 @@
 import hammerhead from '../deps/hammerhead';
 import testCafeCore from '../deps/testcafe-core';
+import sendRequestToFrame from '../../core/utils/send-request-to-frame';
+import isIframeWindow from '../../../utils/is-window-in-iframe';
 
 const Promise          = hammerhead.Promise;
 const nativeMethods    = hammerhead.nativeMethods;
@@ -9,7 +11,22 @@ const focusBlurSandbox = hammerhead.eventSandbox.focusBlur;
 const contentEditable = testCafeCore.contentEditable;
 const textSelection   = testCafeCore.textSelection;
 const domUtils        = testCafeCore.domUtils;
+const styleUtils      = testCafeCore.styleUtils;
 
+const messageSandbox = hammerhead.eventSandbox.message;
+
+const GET_IFRAME_REQUEST_CMD  = 'automation|iframe|request';
+const GET_IFRAME_RESPONSE_CMD = 'automation|iframe|response';
+
+messageSandbox.on(messageSandbox.SERVICE_MSG_RECEIVED_EVENT, e => {
+    if (e.message.cmd === GET_IFRAME_REQUEST_CMD) {
+        const iframeElement = domUtils.findIframeByWindow(e.source);
+
+        focusBlurSandbox.focus(iframeElement, () => {
+            messageSandbox.sendServiceMsg({ cmd: GET_IFRAME_RESPONSE_CMD }, e.source);
+        }, false);
+    }
+});
 
 function setCaretPosition (element, caretPos) {
     const isTextEditable    = domUtils.isTextEditableElement(element);
@@ -37,14 +54,20 @@ function setCaretPosition (element, caretPos) {
 }
 
 export function focusAndSetSelection (element, simulateFocus, caretPos) {
-    return new Promise(resolve => {
+    return new Promise(async resolve => {
+        // NOTE: Safari 13 blocks attempts to focus elements inside a third-party iframe before the user interacts with it
+        // https://developer.apple.com/documentation/safari-release-notes/safari-13-release-notes
+        // We can work around this restriction by focusing the <iframe> element beforehand
+        if (isIframeWindow(window))
+            await sendRequestToFrame({ cmd: GET_IFRAME_REQUEST_CMD }, GET_IFRAME_RESPONSE_CMD, window.parent);
+
         const activeElement               = domUtils.getActiveElement();
         const isTextEditable              = domUtils.isTextEditableElement(element);
         const labelWithForAttr            = domUtils.closest(element, 'label[for]');
         const isElementFocusable          = domUtils.isElementFocusable(element);
-        const shouldFocusByRelatedElement = !domUtils.isElementFocusable(element) && labelWithForAttr;
+        const shouldFocusByRelatedElement = !isElementFocusable && labelWithForAttr;
         const isContentEditable           = domUtils.isContentEditableElement(element);
-        let elementForFocus             = isContentEditable ? contentEditable.findContentEditableParent(element) : element;
+        let elementForFocus               = isContentEditable ? contentEditable.findContentEditableParent(element) : element;
 
         // NOTE: in WebKit, if selection was never set in an input element, the focus method selects all the
         // text in this element. So, we should call select before focus to set the caret to the first symbol.
@@ -54,7 +77,7 @@ export function focusAndSetSelection (element, simulateFocus, caretPos) {
         // NOTE: we should call focus for the element related with a 'label' that has the 'for' attribute
         if (shouldFocusByRelatedElement) {
             if (simulateFocus)
-                focusByRelatedElement(labelWithForAttr);
+                focusByLabel(labelWithForAttr);
 
             resolve();
             return;
@@ -62,7 +85,7 @@ export function focusAndSetSelection (element, simulateFocus, caretPos) {
 
         const focusWithSilentMode = !simulateFocus;
         const focusForMouseEvent  = true;
-        let preventScrolling    = false;
+        let preventScrolling      = false;
 
         if (!isElementFocusable && !isContentEditable) {
             const curDocument         = domUtils.findDocument(elementForFocus);
@@ -106,8 +129,17 @@ export function focusAndSetSelection (element, simulateFocus, caretPos) {
 
 export function getElementBoundToLabel (element) {
     const labelWithForAttr = domUtils.closest(element, 'label[for]');
+    const control          = labelWithForAttr && (labelWithForAttr.control || document.getElementById(labelWithForAttr.htmlFor));
+    const isControlVisible = control && styleUtils.isElementVisible(control);
 
-    return labelWithForAttr && labelWithForAttr.control;
+    return isControlVisible ? control : null;
+}
+
+export function focusByLabel (label) {
+    if (domUtils.isElementFocusable(label))
+        focusBlurSandbox.focus(label, testCafeCore.noop, false, true);
+    else
+        focusByRelatedElement(label);
 }
 
 export function focusByRelatedElement (element) {

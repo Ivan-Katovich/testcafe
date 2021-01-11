@@ -1,6 +1,5 @@
 const expect                    = require('chai').expect;
 const sinon                     = require('sinon');
-const Promise                   = require('pinkie');
 const correctBrowsersAndSources = require('../../lib/cli/correct-browsers-and-sources');
 const browserProviderPool       = require('../../lib/browser/provider/pool');
 
@@ -24,8 +23,10 @@ class ConfigurationMock {
 class ArgsMock {
     constructor (args) {
         this.args     = args;
-        this.browsers = args[0] && args[0].split(',');
-        this.src      = args.slice(1);
+        this.opts = {
+            browsers: args[0] && args[0].split(','),
+            src:      args.slice(1)
+        };
     }
 }
 describe('CLI Correct browsers and sources', () => {

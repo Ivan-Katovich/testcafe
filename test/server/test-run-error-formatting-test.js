@@ -1,79 +1,111 @@
-const expect                                             = require('chai').expect;
-const read                                               = require('read-file-relative').readSync;
-const { escapeRegExp, pull: remove, chain, values }      = require('lodash');
-const ReporterPluginHost                                 = require('../../lib/reporter/plugin-host');
-const TEST_RUN_PHASE                                     = require('../../lib/test-run/phase');
-const { TEST_RUN_ERRORS, RUNTIME_ERRORS }                = require('../../lib/errors/types');
-const TestRunErrorFormattableAdapter                     = require('../../lib/errors/test-run/formattable-adapter');
-const testCallsite                                       = require('./data/test-callsite');
-const AssertionExecutableArgumentError                   = require('../../lib/errors/test-run').AssertionExecutableArgumentError;
-const AssertionWithoutMethodCallError                    = require('../../lib/errors/test-run').AssertionWithoutMethodCallError;
-const AssertionUnawaitedPromiseError                     = require('../../lib/errors/test-run').AssertionUnawaitedPromiseError;
-const ActionIntegerOptionError                           = require('../../lib/errors/test-run').ActionIntegerOptionError;
-const ActionPositiveIntegerOptionError                   = require('../../lib/errors/test-run').ActionPositiveIntegerOptionError;
-const ActionIntegerArgumentError                         = require('../../lib/errors/test-run').ActionIntegerArgumentError;
-const ActionPositiveIntegerArgumentError                 = require('../../lib/errors/test-run').ActionPositiveIntegerArgumentError;
-const ActionBooleanOptionError                           = require('../../lib/errors/test-run').ActionBooleanOptionError;
-const ActionBooleanArgumentError                         = require('../../lib/errors/test-run').ActionBooleanArgumentError;
-const ActionSpeedOptionError                             = require('../../lib/errors/test-run').ActionSpeedOptionError;
-const ActionSelectorError                                = require('../../lib/errors/test-run').ActionSelectorError;
-const ActionOptionsTypeError                             = require('../../lib/errors/test-run').ActionOptionsTypeError;
-const ActionStringArgumentError                          = require('../../lib/errors/test-run').ActionStringArgumentError;
-const ActionNullableStringArgumentError                  = require('../../lib/errors/test-run').ActionNullableStringArgumentError;
-const ActionStringOrStringArrayArgumentError             = require('../../lib/errors/test-run').ActionStringOrStringArrayArgumentError;
-const ActionStringArrayElementError                      = require('../../lib/errors/test-run').ActionStringArrayElementError;
-const PageLoadError                                      = require('../../lib/errors/test-run').PageLoadError;
-const UncaughtErrorOnPage                                = require('../../lib/errors/test-run').UncaughtErrorOnPage;
-const UncaughtErrorInTestCode                            = require('../../lib/errors/test-run').UncaughtErrorInTestCode;
-const UncaughtErrorInClientFunctionCode                  = require('../../lib/errors/test-run').UncaughtErrorInClientFunctionCode;
-const UncaughtNonErrorObjectInTestCode                   = require('../../lib/errors/test-run').UncaughtNonErrorObjectInTestCode;
-const UncaughtErrorInCustomDOMPropertyCode               = require('../../lib/errors/test-run').UncaughtErrorInCustomDOMPropertyCode;
-const UnhandledPromiseRejectionError                     = require('../../lib/errors/test-run').UnhandledPromiseRejectionError;
-const UncaughtExceptionError                             = require('../../lib/errors/test-run').UncaughtExceptionError;
-const ActionElementNotFoundError                         = require('../../lib/errors/test-run').ActionElementNotFoundError;
-const ActionElementIsInvisibleError                      = require('../../lib/errors/test-run').ActionElementIsInvisibleError;
-const ActionSelectorMatchesWrongNodeTypeError            = require('../../lib/errors/test-run').ActionSelectorMatchesWrongNodeTypeError;
-const ActionAdditionalElementNotFoundError               = require('../../lib/errors/test-run').ActionAdditionalElementNotFoundError;
-const ActionAdditionalElementIsInvisibleError            = require('../../lib/errors/test-run').ActionAdditionalElementIsInvisibleError;
-const ActionAdditionalSelectorMatchesWrongNodeTypeError  = require('../../lib/errors/test-run').ActionAdditionalSelectorMatchesWrongNodeTypeError;
-const ActionElementNonEditableError                      = require('../../lib/errors/test-run').ActionElementNonEditableError;
-const ActionElementNonContentEditableError               = require('../../lib/errors/test-run').ActionElementNonContentEditableError;
-const ActionRootContainerNotFoundError                   = require('../../lib/errors/test-run').ActionRootContainerNotFoundError;
-const ActionElementNotTextAreaError                      = require('../../lib/errors/test-run').ActionElementNotTextAreaError;
-const ActionIncorrectKeysError                           = require('../../lib/errors/test-run').ActionIncorrectKeysError;
-const ActionCannotFindFileToUploadError                  = require('../../lib/errors/test-run').ActionCannotFindFileToUploadError;
-const ActionElementIsNotFileInputError                   = require('../../lib/errors/test-run').ActionElementIsNotFileInputError;
-const ActionUnsupportedDeviceTypeError                   = require('../../lib/errors/test-run').ActionUnsupportedDeviceTypeError;
-const ActionInvalidScrollTargetError                     = require('../../lib/errors/test-run').ActionInvalidScrollTargetError;
-const ClientFunctionExecutionInterruptionError           = require('../../lib/errors/test-run').ClientFunctionExecutionInterruptionError;
-const ActionElementNotIframeError                        = require('../../lib/errors/test-run').ActionElementNotIframeError;
-const ActionIframeIsNotLoadedError                       = require('../../lib/errors/test-run').ActionIframeIsNotLoadedError;
-const CurrentIframeIsNotLoadedError                      = require('../../lib/errors/test-run').CurrentIframeIsNotLoadedError;
-const CurrentIframeNotFoundError                         = require('../../lib/errors/test-run').CurrentIframeNotFoundError;
-const CurrentIframeIsInvisibleError                      = require('../../lib/errors/test-run').CurrentIframeIsInvisibleError;
-const MissingAwaitError                                  = require('../../lib/errors/test-run').MissingAwaitError;
-const ExternalAssertionLibraryError                      = require('../../lib/errors/test-run').ExternalAssertionLibraryError;
-const DomNodeClientFunctionResultError                   = require('../../lib/errors/test-run').DomNodeClientFunctionResultError;
-const InvalidSelectorResultError                         = require('../../lib/errors/test-run').InvalidSelectorResultError;
-const NativeDialogNotHandledError                        = require('../../lib/errors/test-run').NativeDialogNotHandledError;
-const UncaughtErrorInNativeDialogHandler                 = require('../../lib/errors/test-run').UncaughtErrorInNativeDialogHandler;
-const SetNativeDialogHandlerCodeWrongTypeError           = require('../../lib/errors/test-run').SetNativeDialogHandlerCodeWrongTypeError;
-const CannotObtainInfoForElementSpecifiedBySelectorError = require('../../lib/errors/test-run').CannotObtainInfoForElementSpecifiedBySelectorError;
-const WindowDimensionsOverflowError                      = require('../../lib/errors/test-run').WindowDimensionsOverflowError;
-const ForbiddenCharactersInScreenshotPathError           = require('../../lib/errors/test-run').ForbiddenCharactersInScreenshotPathError;
-const InvalidElementScreenshotDimensionsError            = require('../../lib/errors/test-run').InvalidElementScreenshotDimensionsError;
-const SetTestSpeedArgumentError                          = require('../../lib/errors/test-run').SetTestSpeedArgumentError;
-const RoleSwitchInRoleInitializerError                   = require('../../lib/errors/test-run').RoleSwitchInRoleInitializerError;
-const ActionRoleArgumentError                            = require('../../lib/errors/test-run').ActionRoleArgumentError;
-const { createSimpleTestStream }                         = require('../functional/utils/stream');
+const expect                              = require('chai').expect;
+const { pull: remove, chain, values }     = require('lodash');
+const TestRun                             = require('../../lib/test-run');
+const TEST_RUN_PHASE                      = require('../../lib/test-run/phase');
+const { TEST_RUN_ERRORS, RUNTIME_ERRORS } = require('../../lib/errors/types');
+const TestRunErrorFormattableAdapter      = require('../../lib/errors/test-run/formattable-adapter');
+const testCallsite                        = require('./data/test-callsite');
+const assertTestRunError                  = require('./helpers/assert-test-run-error');
 
-const TEST_FILE_STACK_ENTRY_RE = new RegExp('\\s*\\n?\\(' + escapeRegExp(require.resolve('./data/test-callsite')), 'g');
+const {
+    AssertionExecutableArgumentError,
+    AssertionWithoutMethodCallError,
+    AssertionUnawaitedPromiseError,
+    ActionIntegerOptionError,
+    ActionPositiveIntegerOptionError,
+    ActionIntegerArgumentError,
+    ActionPositiveIntegerArgumentError,
+    ActionBooleanOptionError,
+    ActionBooleanArgumentError,
+    ActionSpeedOptionError,
+    ActionSelectorError,
+    ActionOptionsTypeError,
+    ActionStringArgumentError,
+    ActionNullableStringArgumentError,
+    ActionStringOrStringArrayArgumentError,
+    ActionStringArrayElementError,
+    ActionFunctionArgumentError,
+    PageLoadError,
+    UncaughtErrorOnPage,
+    UncaughtErrorInTestCode,
+    UncaughtErrorInClientFunctionCode,
+    UncaughtNonErrorObjectInTestCode,
+    UncaughtErrorInCustomDOMPropertyCode,
+    UnhandledPromiseRejectionError,
+    UncaughtExceptionError,
+    ActionElementNotFoundError,
+    ActionElementIsInvisibleError,
+    ActionSelectorMatchesWrongNodeTypeError,
+    ActionAdditionalElementNotFoundError,
+    ActionAdditionalElementIsInvisibleError,
+    ActionAdditionalSelectorMatchesWrongNodeTypeError,
+    ActionElementNonEditableError,
+    ActionElementNonContentEditableError,
+    ActionRootContainerNotFoundError,
+    ActionElementNotTextAreaError,
+    ActionIncorrectKeysError,
+    ActionCannotFindFileToUploadError,
+    ActionElementIsNotFileInputError,
+    ActionUnsupportedDeviceTypeError,
+    ActionInvalidScrollTargetError,
+    ClientFunctionExecutionInterruptionError,
+    ActionElementNotIframeError,
+    ActionIframeIsNotLoadedError,
+    CurrentIframeIsNotLoadedError,
+    CurrentIframeNotFoundError,
+    CurrentIframeIsInvisibleError,
+    MissingAwaitError,
+    ExternalAssertionLibraryError,
+    DomNodeClientFunctionResultError,
+    InvalidSelectorResultError,
+    NativeDialogNotHandledError,
+    UncaughtErrorInNativeDialogHandler,
+    SetNativeDialogHandlerCodeWrongTypeError,
+    CannotObtainInfoForElementSpecifiedBySelectorError,
+    WindowDimensionsOverflowError,
+    ForbiddenCharactersInScreenshotPathError,
+    InvalidElementScreenshotDimensionsError,
+    SetTestSpeedArgumentError,
+    RoleSwitchInRoleInitializerError,
+    ActionRoleArgumentError,
+    RequestHookNotImplementedMethodError,
+    RequestHookUnhandledError,
+    UncaughtErrorInCustomClientScriptCode,
+    UncaughtErrorInCustomClientScriptLoadedFromModule,
+    UncaughtErrorInCustomScript,
+    UncaughtTestCafeErrorInCustomScript,
+    ChildWindowIsNotLoadedError,
+    ChildWindowNotFoundError,
+    CannotSwitchToWindowError,
+    CloseChildWindowError,
+    ChildWindowClosedBeforeSwitchingError,
+    WindowNotFoundError,
+    ParentWindowNotFoundError,
+    PreviousWindowNotFoundError,
+    SwitchToWindowPredicateError,
+    CannotCloseWindowWithChildrenError,
+    MultipleWindowsModeIsDisabledError,
+    CannotCloseWindowWithoutParentError,
+    MultipleWindowsModeIsNotAvailableInRemoteBrowserError,
+    CannotRestoreChildWindowError
+} = require('../../lib/errors/test-run');
 
 const untestedErrorTypes = Object.keys(TEST_RUN_ERRORS).map(key => TEST_RUN_ERRORS[key]);
 
-const userAgentMock = 'Chrome 15.0.874 / Mac OS X 10.8.1';
+const userAgentMock = 'Chrome 15.0.874.120 / macOS 10.15';
 
-const testAssertionError = (function () {
+const testAssertionErrorArray = (function () {
+    try {
+        expect([1, 2, 3, [4, 5], 6]).eql([1, 4, 2, 3, [5, 6, [7]]]);
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorBoolean = (function () {
     try {
         expect(true).eql(false);
     }
@@ -84,31 +116,133 @@ const testAssertionError = (function () {
     return null;
 })();
 
+const testAssertionErrorBuffer = (function () {
+    try {
+        expect(Buffer.from('test')).eql(Buffer.from([1, 2, 3]));
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorEmpty = (function () {
+    try {
+        expect([]).eql('');
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorFunction = (function () {
+    try {
+        expect(function () {
+            return true;
+        }).eql(function () {
+            return false;
+        });
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorNumber = (function () {
+    try {
+        expect(1).eql(2);
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorObject = (function () {
+    try {
+        const obj1 = {
+            first: {
+                second: {
+                    third: {
+                        fourth: {
+                            fifth: {
+                                hello: 'world',
+                                six:   '6'
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        const obj2 = {
+            first: {
+                second: {
+                    third: {
+                        fourth: {
+                            fifth: {
+                                hello: 'world'
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        expect(obj1).eql(obj2);
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorString = (function () {
+    try {
+        expect('hi').eql('hey');
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
+const testAssertionErrorUndefinedNull = (function () {
+    let undefinedVar;
+
+    try {
+        expect(undefinedVar).eql(null);
+    }
+    catch (err) {
+        return err;
+    }
+
+    return null;
+})();
+
 const longSelector = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua';
 
-function assertErrorMessage (file, err) {
+function getErrorAdapter (err) {
     const screenshotPath = '/unix/path/with/<tag>';
-    const outStreamMock  = createSimpleTestStream();
-    const plugin         = new ReporterPluginHost({}, outStreamMock);
 
-    const errAdapter = new TestRunErrorFormattableAdapter(err, {
+    return new TestRunErrorFormattableAdapter(err, {
         userAgent:      userAgentMock,
         screenshotPath: screenshotPath,
         callsite:       testCallsite,
         testRunPhase:   TEST_RUN_PHASE.initial
     });
+}
 
-    plugin
-        .useWordWrap(true)
-        .write(plugin.formatError(errAdapter));
-
-    const expectedMsg = read('./data/expected-test-run-errors/' + file)
-        .replace(/(\r\n)/gm, '\n')
-        .trim();
-
-    const actual = outStreamMock.data.replace(TEST_FILE_STACK_ENTRY_RE, ' (testfile.js');
-
-    expect(actual).eql(expectedMsg);
+function assertErrorMessage (file, err) {
+    assertTestRunError(err, '../data/expected-test-run-errors/' + file);
 
     // NOTE: check that the list of error types contains an
     // error of this type and remove tested messages from the list
@@ -118,6 +252,43 @@ function assertErrorMessage (file, err) {
 
 describe('Error formatting', () => {
     describe('Errors', () => {
+        it('Base error formattable adapter properties', () => {
+            const testRunMock = TestRun.prototype;
+
+            Object.assign(testRunMock, {
+                session:           { id: 'test-run-id' },
+                browserConnection: { userAgent: 'chrome' },
+                errScreenshotPath: 'screenshot-path',
+                phase:             'test-run-phase',
+                callsite:          'callsite',
+                errs:              []
+            });
+
+            TestRun.prototype.addError.call(testRunMock, { callsite: 'callsite' });
+
+            const err = testRunMock.errs[0];
+
+            expect(err).instanceOf(TestRunErrorFormattableAdapter);
+
+            expect(err).eql({
+                userAgent:      'chrome',
+                screenshotPath: 'screenshot-path',
+                testRunId:      'test-run-id',
+                testRunPhase:   'test-run-phase',
+                callsite:       'callsite'
+            });
+        });
+
+        it('Should not throw if the specified decorator was not found', () => {
+            expect(() => {
+                const error = new ExternalAssertionLibraryError(testAssertionErrorArray, testCallsite);
+
+                error.diff = '<div class="unknown-decorator">text</div>';
+
+                getErrorAdapter(error).formatMessage('', 100);
+            }).to.not.throw();
+        });
+
         it('Should format "actionIntegerOptionError" message', () => {
             assertErrorMessage('action-integer-option-error', new ActionIntegerOptionError('offsetX', '1.01'));
         });
@@ -182,7 +353,10 @@ describe('Error formatting', () => {
         });
 
         it('Should format "actionElementNotFoundError" message', () => {
-            assertErrorMessage('action-element-not-found-error', new ActionElementNotFoundError({ apiFnChain: [longSelector, 'one', 'two', 'three'], apiFnIndex: 1 }));
+            assertErrorMessage('action-element-not-found-error', new ActionElementNotFoundError({
+                apiFnChain: [longSelector, 'one', 'two', 'three'],
+                apiFnIndex: 1
+            }));
         });
 
         it('Should format "actionElementIsInvisibleError" message', () => {
@@ -222,7 +396,10 @@ describe('Error formatting', () => {
         });
 
         it('Should format "actionAdditionalElementNotFoundError" message', () => {
-            assertErrorMessage('action-additional-element-not-found-error', new ActionAdditionalElementNotFoundError('startSelector', { apiFnChain: [longSelector, 'one', 'two', 'three'], apiFnIndex: 1 }));
+            assertErrorMessage('action-additional-element-not-found-error', new ActionAdditionalElementNotFoundError('startSelector', {
+                apiFnChain: [longSelector, 'one', 'two', 'three'],
+                apiFnIndex: 1
+            }));
         });
 
         it('Should format "actionAdditionalElementIsInvisibleError" message', () => {
@@ -258,7 +435,11 @@ describe('Error formatting', () => {
         });
 
         it('Should format "actionCannotFindFileToUploadError" message', () => {
-            assertErrorMessage('action-cannot-find-file-to-upload-error', new ActionCannotFindFileToUploadError(['/path/1', '/path/2']));
+            const filePaths        = ['/path/1', '/path/2'];
+            const scannedFilePaths = ['full-path-to/path/1', 'full-path-to/path/2'];
+            const err              = new ActionCannotFindFileToUploadError(filePaths, scannedFilePaths);
+
+            assertErrorMessage('action-cannot-find-file-to-upload-error', err);
         });
 
         it('Should format "actionUnsupportedDeviceTypeError" message', () => {
@@ -285,12 +466,23 @@ describe('Error formatting', () => {
             assertErrorMessage('current-iframe-is-invisible-error', new CurrentIframeIsInvisibleError());
         });
 
-        it('Should format "missingAwaitError', () => {
+        it('Should format "missingAwaitError"', () => {
             assertErrorMessage('missing-await-error', new MissingAwaitError(testCallsite));
         });
 
-        it('Should format "externalAssertionLibraryError', () => {
-            assertErrorMessage('external-assertion-library-error', new ExternalAssertionLibraryError(testAssertionError, testCallsite));
+        it('Should format "externalAssertionLibraryError"', () => {
+            const filepath = filename => `../data/expected-test-run-errors/external-assertion-library-errors/${filename}`;
+
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorArray, testCallsite), filepath('array'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorBoolean, testCallsite), filepath('boolean'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorBuffer, testCallsite), filepath('buffer'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorEmpty, testCallsite), filepath('empty-representation'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorFunction, testCallsite), filepath('function'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorNumber, testCallsite), filepath('number'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorObject, testCallsite), filepath('object'));
+            assertTestRunError(new ExternalAssertionLibraryError(testAssertionErrorString, testCallsite), filepath('string'));
+
+            assertErrorMessage('external-assertion-library-errors/undefined-null', new ExternalAssertionLibraryError(testAssertionErrorUndefinedNull, testCallsite));
         });
 
         it('Should format "uncaughtErrorInClientFunctionCode"', () => {
@@ -322,7 +514,10 @@ describe('Error formatting', () => {
         });
 
         it('Should format "cannotObtainInfoForElementSpecifiedBySelectorError"', () => {
-            assertErrorMessage('cannot-obtain-info-for-element-specified-by-selector-error', new CannotObtainInfoForElementSpecifiedBySelectorError(testCallsite, { apiFnChain: [longSelector, 'one', 'two', 'three'], apiFnIndex: 1 }));
+            assertErrorMessage('cannot-obtain-info-for-element-specified-by-selector-error', new CannotObtainInfoForElementSpecifiedBySelectorError(testCallsite, {
+                apiFnChain: [longSelector, 'one', 'two', 'three'],
+                apiFnIndex: 1
+            }));
         });
 
         it('Should format "windowDimensionsOverflowError"', () => {
@@ -330,7 +525,10 @@ describe('Error formatting', () => {
         });
 
         it('Should format "forbiddenCharactersInScreenshotPathError"', () => {
-            assertErrorMessage('forbidden-characters-in-screenshot-path-error', new ForbiddenCharactersInScreenshotPathError('/root/bla:bla', [{ chars: ':', index: 9 }]));
+            assertErrorMessage('forbidden-characters-in-screenshot-path-error', new ForbiddenCharactersInScreenshotPathError('/root/bla:bla', [{
+                chars: ':',
+                index: 9
+            }]));
         });
 
         it('Should format "invalidElementScreenshotDimensionsError"', () => {
@@ -359,6 +557,93 @@ describe('Error formatting', () => {
 
         it('Should format "assertionUnawaitedPromiseError"', () => {
             assertErrorMessage('assertion-unawaited-promise-error', new AssertionUnawaitedPromiseError(testCallsite));
+        });
+
+        it('Should format "requestHookNotImplementedError"', () => {
+            assertErrorMessage('request-hook-method-not-implemented-error', new RequestHookNotImplementedMethodError('onRequest', 'MyHook'));
+        });
+
+        it('Should format "requestHookUnhandledError"', () => {
+            assertErrorMessage('request-hook-unhandled-error', new RequestHookUnhandledError(new Error('Test error'), 'MyHook', 'onRequest'));
+        });
+
+        it('Should format "uncaughtErrorInCustomClientScriptCode"', () => {
+            assertErrorMessage('uncaught-error-in-custom-client-script-code', new UncaughtErrorInCustomClientScriptCode(new TypeError('Cannot read property "prop" of undefined')));
+        });
+
+        it('Should format "uncaughtErrorInCustomClientScriptCodeLoadedFromModule"', () => {
+            assertErrorMessage('uncaught-error-in-custom-client-script-code-loaded-from-module', new UncaughtErrorInCustomClientScriptLoadedFromModule(new TypeError('Cannot read property "prop" of undefined'), 'test-module'));
+        });
+
+        it('Should format "uncaughtErrorInCustomScript"', () => {
+            assertErrorMessage('uncaught-error-in-custom-script', new UncaughtErrorInCustomScript(new Error('Test error'), '1+1', 1, 1, 'RAW API callsite'));
+        });
+
+        it('Should format "uncaughtTestCafeErrorInCustomScript"', () => {
+            const expression  = 'Hey ya!';
+            const originError = getErrorAdapter(new UncaughtNonErrorObjectInTestCode(expression));
+
+            assertErrorMessage('uncaught-test-cafe-error-in-custom-script', new UncaughtTestCafeErrorInCustomScript(originError, expression, void 0, void 0, 'RAW API callsite'));
+        });
+
+        it('Should format "childWindowIsNotLoadedError"', () => {
+            assertErrorMessage('child-window-is-not-loaded-error', new ChildWindowIsNotLoadedError());
+        });
+
+        it('Should format "childWindowNotFoundError"', () => {
+            assertErrorMessage('child-window-not-found-error', new ChildWindowNotFoundError());
+        });
+
+        it('Should format "cannotSwitchToWindowError"', () => {
+            assertErrorMessage('cannot-switch-to-child-window-error', new CannotSwitchToWindowError());
+        });
+
+        it('Should format "closeChildWindowError"', () => {
+            assertErrorMessage('close-child-window-error', new CloseChildWindowError());
+        });
+
+        it('Should format "childWindowClosedBeforeSwitchingError"', () => {
+            assertErrorMessage('child-window-closed-before-switching-error', new ChildWindowClosedBeforeSwitchingError());
+        });
+
+        it('Should format "cannotCloseWindowWithChildrenError"', () => {
+            assertErrorMessage('cannot-close-window-with-children-error', new CannotCloseWindowWithChildrenError());
+        });
+
+        it('Should format "cannotCloseWindowWithoutParentError"', () => {
+            assertErrorMessage('cannot-close-window-without-parent-error', new CannotCloseWindowWithoutParentError());
+        });
+
+        it('Should format "windowNotFoundError"', () => {
+            assertErrorMessage('window-not-found-error', new WindowNotFoundError());
+        });
+
+        it('Should format "parentWindowNotFoundError"', () => {
+            assertErrorMessage('parent-window-not-found-error', new ParentWindowNotFoundError());
+        });
+
+        it('Should format "previousWindowNotFoundError"', () => {
+            assertErrorMessage('previous-window-not-found-error', new PreviousWindowNotFoundError());
+        });
+
+        it('Should format "switchToWindowPredicateError"', () => {
+            assertErrorMessage('switch-to-window-predicate-error', new SwitchToWindowPredicateError('error message'));
+        });
+
+        it('Should format "actionFunctionArgumentError"', () => {
+            assertErrorMessage('action-function-argument-error', new ActionFunctionArgumentError('predicate', 'number'));
+        });
+
+        it('Should format "multipleWindowsModeIsDisabledError"', () => {
+            assertErrorMessage('multiple-windows-mode-is-disabled-error', new MultipleWindowsModeIsDisabledError('openWindow'));
+        });
+
+        it('Should format "multipleWindowsModeIsNotSupportedInRemoteBrowserError"', () => {
+            assertErrorMessage('multiple-windows-mode-is-not-available-in-remote-browser-error', new MultipleWindowsModeIsNotAvailableInRemoteBrowserError('openWindow'));
+        });
+
+        it('Should format "cannotRestoreChildWindowError"', () => {
+            assertErrorMessage('cannot-restore-child-window-error', new CannotRestoreChildWindowError());
         });
     });
 

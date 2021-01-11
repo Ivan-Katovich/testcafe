@@ -4,17 +4,17 @@ const path                    = require('path');
 const chai                    = require('chai');
 const { expect }              = chai;
 const request                 = require('request');
-const Promise                 = require('pinkie');
 const { noop, times, uniqBy } = require('lodash');
+const consoleWrapper          = require('./helpers/console-wrapper');
+const isAlpine                = require('./helpers/is-alpine');
 const createTestCafe          = require('../../lib/');
 const COMMAND                 = require('../../lib/browser/connection/command');
 const Task                    = require('../../lib/runner/task');
-const Reporter                = require('../../lib/reporter');
 const BrowserConnection       = require('../../lib/browser/connection');
 const BrowserSet              = require('../../lib/runner/browser-set');
 const browserProviderPool     = require('../../lib/browser/provider/pool');
 const delay                   = require('../../lib/utils/delay');
-const consoleWrapper          = require('./helpers/console-wrapper');
+const OptionNames             = require('../../lib/configuration/option-names');
 
 chai.use(require('chai-string'));
 
@@ -23,6 +23,8 @@ describe('Runner', () => {
     let runner                    = null;
     let connection                = null;
     let origRemoteBrowserProvider = null;
+
+    const BROWSER_NAME = `${isAlpine() ? 'chromium' : 'chrome'}:headless`;
 
     const remoteBrowserProviderMock = {
         openBrowser () {
@@ -33,8 +35,6 @@ describe('Runner', () => {
             return Promise.resolve();
         }
     };
-
-    const browserMock = { path: '/non/exist' };
 
     before(() => {
         return createTestCafe('127.0.0.1', 1335, 1336)
@@ -147,21 +147,6 @@ describe('Runner', () => {
                 });
         });
 
-        it('Should raise an error if several reporters are going to write to the stdout', () => {
-            return runner
-                .browsers(connection)
-                .reporter(['json', 'xunit'])
-                .src('test/server/data/test-suites/basic/testfile2.js')
-                .run()
-                .then(() => {
-                    throw new Error('Promise rejection expected');
-                })
-                .catch(err => {
-                    expect(err.message).eql('Multiple reporters attempting to write to stdout: "json, xunit". ' +
-                                            'Only one reporter can write to stdout.');
-                });
-        });
-
         it('Should fallback to the default reporter if reporter was not set', () => {
             const storedRunTaskFn = runner._runTask;
 
@@ -266,7 +251,11 @@ describe('Runner', () => {
                 .run();
         });
 
-        it('Should throw an error if the screenshot path pattern is specified without a base screenshot path', () => {
+        it('Should allow to specify path pattern without a base screenshot path', () => {
+            runner._createRunnableConfiguration = () => {
+                throw new Error('stop executing runner.');
+            };
+
             return runner
                 .browsers(connection)
                 .screenshots(void 0, true, '${DATE}')
@@ -276,11 +265,14 @@ describe('Runner', () => {
                     throw new Error('Promise rejection expected');
                 })
                 .catch(err => {
-                    expect(err.message).eql('Unable to set the screenshot path pattern when screenshots are disabled. Specify the base path where screenshots are stored to enable them.');
+                    expect(err.message).eql('stop executing runner.');
+
+                    expect(runner.configuration.getOption('screenshots').path).eql(path.resolve(process.cwd(), 'screenshots'));
+                    expect(runner.configuration.getOption('screenshots').pathPattern).eql('${DATE}');
                 });
         });
 
-        it('Should not display a message about "overriden options" after call "screenshots" method with undefined arguments', () => {
+        it('Should not display a message about "overridden options" after call "screenshots" method with undefined arguments', () => {
             const savedConsoleLog = console.log;
 
             console.log = consoleWrapper.log;
@@ -292,6 +284,126 @@ describe('Runner', () => {
                     console.log = savedConsoleLog;
 
                     expect(consoleWrapper.messages.log).eql(null);
+                });
+        });
+
+        it('should allow to set object as a `screenshots` method parameter', () => {
+            runner
+                .screenshots({
+                    path:        'path',
+                    takeOnFails: true,
+                    pathPattern: 'pathPattern',
+                    fullPage:    true
+                });
+
+            expect(runner.configuration.getOption('screenshots').path).eql('path');
+            expect(runner.configuration.getOption('screenshots').takeOnFails).eql(true);
+            expect(runner.configuration.getOption('screenshots').pathPattern).eql('pathPattern');
+            expect(runner.configuration.getOption('screenshots').fullPage).eql(true);
+        });
+
+        it('Validate screenshot options. The `screenshots` option has priority', () => {
+            runner.configuration.mergeOptions({
+                'screenshots': {
+                    'path':        'path1',
+                    'pathPattern': 'pattern1',
+                    'fullPage':    true
+                },
+                'screenshotPath':        'path2',
+                'screenshotPathPattern': 'pattern2'
+            });
+
+            expect(runner._getScreenshotOptions()).eql({
+                path:        'path1',
+                pathPattern: 'pattern1',
+            });
+        });
+
+        it('Validate screenshot options. Obsolete options are still validated', () => {
+            runner.configuration.mergeOptions({
+                'screenshots': {
+                    'fullPage': true
+                },
+                'screenshotPath':        'path2',
+                'screenshotPathPattern': 'pattern2'
+            });
+
+            expect(runner._getScreenshotOptions()).eql({
+                path:        'path2',
+                pathPattern: 'pattern2'
+            });
+        });
+
+        it('Should use default `screenshots.path` if is not set', () => {
+            runner._createRunnableConfiguration = () => {
+                throw new Error('stop executing runner.');
+            };
+
+            return runner
+                .browsers(connection)
+                .src('test/server/data/test-suites/basic/testfile1.js')
+                .run()
+                .catch(err => {
+                    expect(err.message).eql('stop executing runner.');
+                    expect(runner.configuration.getOption('screenshots').path).eql(path.resolve(process.cwd(), 'screenshots'));
+                });
+        });
+    });
+
+    describe('--retry-test-pages', () => {
+        it('hostname is not localhost and ssl is disabled', () => {
+            runner.configuration.mergeOptions({ [OptionNames.retryTestPages]: true });
+            runner.configuration.mergeOptions({ [OptionNames.hostname]: 'http://example.com' });
+
+            console.log(runner.configuration.getOption('hostname'));
+
+            return runner
+                .browsers(connection)
+                .src('test/server/data/test-suites/basic/testfile2.js')
+                .run()
+                .then(() => {
+                    throw new Error('Promise rejection expected');
+                })
+                .catch(err => {
+                    expect(err.message).eql(
+                        'Cannot enable the \'retryTestPages\' option. Apply one of the following two solutions:\n' +
+                        '-- set \'localhost\' as the value of the \'hostname\' option\n' +
+                        '-- run TestCafe over HTTPS\n'
+                    );
+                });
+        });
+
+        it('hostname is localhost and ssl is disabled', () => {
+            runner.configuration.mergeOptions({ [OptionNames.retryTestPages]: true });
+
+            runner._runTask = () => {
+                throw new Error('Promise rejection expected');
+            };
+
+            return runner
+                .browsers(connection)
+                .src('test/server/data/test-suites/basic/testfile2.js')
+                .run()
+                .catch(err => {
+                    expect(err.message).eql('Promise rejection expected');
+                });
+        });
+
+        it('hostname is not localhost and ssl is enabled', () => {
+            runner.configuration.mergeOptions({ [OptionNames.retryTestPages]: true });
+            runner.configuration.mergeOptions({ [OptionNames.hostname]: 'http://example.com' });
+            runner.configuration.mergeOptions({ [OptionNames.ssl]: 'ssl' });
+
+            runner._runTask = () => {
+                throw new Error('Promise rejection expected');
+            };
+
+            return runner
+                .browsers(connection)
+                .src('test/server/data/test-suites/basic/testfile2.js')
+                .run()
+                .catch(err => {
+                    expect(err.message).eql('Promise rejection expected');
                 });
         });
     });
@@ -355,7 +467,7 @@ describe('Runner', () => {
             };
 
             return runner
-                .browsers(browserMock)
+                .browsers(BROWSER_NAME)
                 .src('test/server/data/test-suites/basic/testfile1.js',
                     [
                         'test/server/data/test-suites/basic/*.js',
@@ -365,16 +477,18 @@ describe('Runner', () => {
                 .run();
         });
 
-        it('Should raise an error if the source was not set', () => {
+        it('Should use default `src` if the source was not set', () => {
+            runner._createRunnableConfiguration = () => {
+                throw new Error('stop executing runner.');
+            };
+
             return runner
                 .browsers(connection)
                 .reporter('list')
                 .run()
-                .then(() => {
-                    throw new Error('Promise rejection expected');
-                })
                 .catch(err => {
-                    expect(err.message).eql('No test file specified.');
+                    expect(err.message).eql('stop executing runner.');
+                    expect(runner.configuration.getOption('src')).eql(['tests', 'test']);
                 });
         });
 
@@ -384,7 +498,8 @@ describe('Runner', () => {
                 .src(['test/server/data/test-suites/test-as-module/without-tests/testfile.js'])
                 .run()
                 .catch(err => {
-                    expect(err.message).eql('No tests to run. Either the test files contain no tests or the filter function is too restrictive.');
+                    expect(err.message).eql('No tests found in the specified source files.\n' +
+                        "Ensure the sources contain the 'fixture' and 'test' directives.");
                 });
         });
 
@@ -493,14 +608,15 @@ describe('Runner', () => {
                     throw new Error('Promise rejection expected');
                 })
                 .catch(err => {
-                    expect(err.message).eql('No tests to run. Either the test files contain no tests ' +
-                                            'or the filter function is too restrictive.');
+                    expect(err.message).eql('The specified filter settings exclude all tests.\n' +
+                        'Modify these settings to leave at least one available test.\n' +
+                        'For more information on how to specify filter settings, see https://devexpress.github.io/testcafe/documentation/using-testcafe/configuration-file.html#filter.');
                 });
         });
     });
 
     describe('.run()', () => {
-        it('Should not create a new remote browser connection if sources are empty', () => {
+        it('Should not create a new remote browser connection if tests are not found', () => {
             const origGenerateId   = BrowserConnection._generateId;
 
             let connectionsCount = 0;
@@ -513,7 +629,7 @@ describe('Runner', () => {
             return runner
                 .browsers(connection)
                 .reporter('list')
-                .src([])
+                .src(['non-existing-file-1.js', 'non-existing-file-2.js'])
                 .run()
                 .then(() => {
                     BrowserConnection._generateId = origGenerateId;
@@ -523,7 +639,14 @@ describe('Runner', () => {
                 .catch(err => {
                     BrowserConnection._generateId = origGenerateId;
 
-                    expect(err.message).eql('No test file specified.');
+                    expect(err.message).eql(
+                        'TestCafe could not find the test files that match the following patterns:\n' +
+                        'non-existing-file-1.js\n' +
+                        'non-existing-file-2.js\n' +
+                        '\n' +
+                        `The "${process.cwd()}" current working directory was used as the base path.\n` +
+                        'Ensure the file patterns are correct or change the current working directory.\n' +
+                        'For more information on how to specify test files, see https://devexpress.github.io/testcafe/documentation/using-testcafe/command-line-interface.html#file-pathglob-pattern.');
 
                     expect(connectionsCount).eql(0);
                 });
@@ -579,7 +702,7 @@ describe('Runner', () => {
                             })
                             .catch(err => {
                                 expect(err.message).eql('The following browsers disconnected: ' +
-                                                        'Chrome 41.0.2227 / Mac OS X 10.10.1. Tests will not be run.');
+                                                        'Chrome 41.0.2227.1 / macOS 10.10.1. Tests will not be run.');
                             })
                             .then(done)
                             .catch(done);
@@ -623,7 +746,7 @@ describe('Runner', () => {
                     throw new Error('Promise rejection expected');
                 })
                 .catch(err => {
-                    expect(err.message).eql('The Chrome 41.0.2227 / Mac OS X 10.10.1 browser disconnected. ' +
+                    expect(err.message).eql('The Chrome 41.0.2227.1 / macOS 10.10.1 browser disconnected. ' +
                                             'This problem may appear when a browser hangs or is closed, ' +
                                             'or due to network issues.');
                 });
@@ -651,6 +774,8 @@ describe('Runner', () => {
                                     brokenConnection.emit('error', new Error('I have failed :('));
                                 else
                                     check();
+                            }).catch(err => {
+                                throw err;
                             });
                         }, 200);
                     }
@@ -733,7 +858,7 @@ describe('Runner', () => {
                 });
         });
 
-        it('Should not display a message about "overriden options" after call "run" method with flags with undefined value', () => {
+        it('Should not display a message about "overridden options" after call "run" method with flags with undefined value', () => {
             const savedConsoleLog = console.log;
 
             console.log = consoleWrapper.log;
@@ -746,10 +871,121 @@ describe('Runner', () => {
                     expect(consoleWrapper.messages.log).eql(null);
                 });
         });
+
+        it('Should use the default debugLogger if necessary', () => {
+            const defaultLogger = require('../../lib/notifications/debug-logger');
+
+            runner._validateDebugLogger();
+
+            expect(runner.configuration.getOption('debugLogger')).to.deep.equal(defaultLogger);
+
+            runner.configuration.mergeOptions({ debugLogger: null });
+            runner._validateDebugLogger();
+
+            expect(runner.configuration.getOption('debugLogger')).to.be.null;
+
+            const customLogger = {
+                showBreakpoint: 'foo',
+                hideBreakpoint: () => {}
+            };
+
+            runner.configuration.mergeOptions({ debugLogger: customLogger });
+            runner._validateDebugLogger();
+
+            expect(runner.configuration.getOption('debugLogger')).to.deep.equal(defaultLogger);
+
+            customLogger.showBreakpoint = () => {};
+            runner.configuration.mergeOptions({ debugLogger: customLogger });
+            runner._validateDebugLogger();
+
+            expect(runner.configuration.getOption('debugLogger')).to.deep.equal(customLogger);
+        });
+
+        it('Should raise an error if request timeout options have wrong type', async () => {
+            let errorCount = 0;
+
+            const checkIncorrectRequestTimeout = (optionName, optionValue, expectedErrorMessage) => {
+                return runner
+                    .run({ [optionName]: optionValue })
+                    .catch(err => {
+                        errorCount++;
+
+                        expect(err.message).eql(expectedErrorMessage);
+
+                        delete runner.configuration._options[optionName];
+                    });
+            };
+
+            await checkIncorrectRequestTimeout(OptionNames.pageRequestTimeout, true, '"pageRequestTimeout" option is expected to be a non-negative number, but it was boolean.');
+            await checkIncorrectRequestTimeout(OptionNames.pageRequestTimeout, -1, '"pageRequestTimeout" option is expected to be a non-negative number, but it was -1.');
+            await checkIncorrectRequestTimeout(OptionNames.ajaxRequestTimeout, true, '"ajaxRequestTimeout" option is expected to be a non-negative number, but it was boolean.');
+            await checkIncorrectRequestTimeout(OptionNames.ajaxRequestTimeout, -1, '"ajaxRequestTimeout" option is expected to be a non-negative number, but it was -1.');
+
+            expect(errorCount).eql(4);
+        });
+    });
+
+    describe('.clientScripts', () => {
+        it('Should raise an error for the multiple ".clientScripts" method call', () => {
+            try {
+                runner
+                    .clientScripts({ source: 'var i = 0;' })
+                    .clientScripts({ source: 'var i = 1;' });
+
+                throw new Error('Should raise an appropriate error.');
+            }
+            catch (err) {
+                expect(err.message).startsWith('You cannot call the "clientScripts" method more than once. Pass an array of parameters to this method instead.');
+            }
+        });
+    });
+
+    describe('.compilerOptions', () => {
+        it('Should warn about deprecated options', () => {
+            const savedConsoleLog = console.log;
+
+            console.log = consoleWrapper.log;
+
+            return runner
+                .tsConfigPath('path-to-ts-config')
+                .run()
+                .catch(() => {
+                    console.log = savedConsoleLog;
+
+                    expect(consoleWrapper.messages.log).eql(
+                        "The 'tsConfigPath' option is deprecated. Use the 'compilerOptions.typescript.configPath' option instead.\n" +
+                        'The deprecated options will be removed in the next major release.\n');
+                });
+        });
+
+        it('Should raise an error if the compilation options is specified wrongly', async () => {
+            const validateCompilerOptions = (opts, errMsg) => {
+                return runner
+                    .compilerOptions(opts)
+                    .run()
+                    .catch(err => {
+                        expect(err.message).eql(errMsg);
+
+                        delete runner.configuration._options[OptionNames.compilerOptions];
+                    });
+            };
+
+            await validateCompilerOptions({
+                'wrong-compiler-type': {},
+                'typescript':          {}
+            }, "You cannot specify options for the 'wrong-compiler-type' compiler.");
+
+            await validateCompilerOptions({
+                'wrong-compiler-type-1': {},
+                'wrong-compiler-type-2': {}
+            }, "You cannot specify options for the 'wrong-compiler-type-1' and 'wrong-compiler-type-2' compilers.");
+        });
     });
 
     describe('Regression', () => {
-        it('Should not have unhandled rejections in runner (GH-825)', () => {
+        it('Should not have unhandled rejections in runner (GH-825)', function () {
+            this.timeout(10000);
+
             let rejectionReason = null;
 
             process.on('unhandledRejection', reason => {
@@ -757,7 +993,7 @@ describe('Runner', () => {
             });
 
             return runner
-                .browsers(browserMock)
+                .browsers(BROWSER_NAME)
                 .src([])
                 .run()
                 .then(() => {
@@ -781,8 +1017,6 @@ describe('Runner', () => {
 
         const origCreateBrowserJobs = Task.prototype._createBrowserJobs;
         const origAbort             = Task.prototype.abort;
-
-        const origAssignTaskEventHandlers = Reporter.prototype._assignTaskEventHandlers;
 
         let closeCalled        = 0;
         let abortCalled        = false;
@@ -811,11 +1045,15 @@ describe('Runner', () => {
                         resolve();
                     }, BROWSER_CLOSING_DELAY);
                 });
+            },
+
+            isHeadlessBrowser () {
+                return true;
             }
         };
 
         function taskDone () {
-            this.pendingBrowserJobs.forEach(job => {
+            this._pendingBrowserJobs.forEach(job => {
                 this.emit('browser-job-done', job);
             });
 
@@ -853,8 +1091,6 @@ describe('Runner', () => {
             Task.prototype.abort = () => {
                 abortCalled = true;
             };
-
-            Reporter.prototype._assignTaskEventHandlers = noop;
         });
 
         after(() => {
@@ -862,8 +1098,6 @@ describe('Runner', () => {
 
             Task.prototype._createBrowserJobs = origCreateBrowserJobs;
             Task.prototype.abort              = origAbort;
-
-            Reporter.prototype._assignTaskEventHandlers = origAssignTaskEventHandlers;
         });
 
         it('Should not stop the task until local connection browsers are not closed when task done', () => {
@@ -970,20 +1204,23 @@ describe('Runner', () => {
         });
     });
 
-    it('Should interpret the empty array of the arguments as the "undefined" value (only in CLI mode for "browsers" and "src" methods)', () => {
+    it('Should interpret the empty array of the arguments as the "undefined" value', () => {
         runner.isCli = true;
 
         runner
             .src('/path-to-test')
-            .browsers('ie');
+            .browsers('ie')
+            .reporter('json');
 
         runner.apiMethodWasCalled.reset();
 
         runner
             .src([])
-            .browsers([]);
+            .browsers([])
+            .reporter([]);
 
         expect(runner.configuration.getOption('src')).eql(['/path-to-test']);
         expect(runner.configuration.getOption('browsers')).eql(['ie']);
+        expect(runner.configuration.getOption('reporter')).eql([ { name: 'json', output: void 0 } ]);
     });
 });

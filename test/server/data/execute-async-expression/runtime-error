@@ -1,0 +1,14 @@
+An unhandled error occurred in the custom script:
+
+Cannot prepare tests due to an error.
+
+Selector is expected to be initialized with a function, CSS selector string,
+another Selector, node snapshot or a Promise returned by a Selector, but
+undefined was passed.
+
+const s = Selector();
+
+Browser: Chrome 15.0.874.120 / macOS 10.15
+Screenshot: /unix/path/with/<tag>
+
+1

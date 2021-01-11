@@ -1,4 +1,4 @@
-import { getViewportSize } from 'testcafe-browser-tools';
+import { getViewportSize } from 'device-specs';
 import { isServiceCommand } from './commands/utils';
 import COMMAND_TYPE from './commands/type';
 import WARNING_MESSAGE from '../notifications/warning-message';
@@ -50,11 +50,6 @@ export default class BrowserManipulationQueue {
     }
 
     async _takeScreenshot (capture) {
-        if (!this.screenshotCapturer.enabled) {
-            this.warningLog.addWarning(WARNING_MESSAGE.screenshotsPathNotSpecified);
-            return null;
-        }
-
         try {
             return await capture();
         }
@@ -77,13 +72,15 @@ export default class BrowserManipulationQueue {
                     customPath:     command.path,
                     pageDimensions: driverMsg.pageDimensions,
                     cropDimensions: driverMsg.cropDimensions,
-                    markSeed:       command.markSeed
+                    markSeed:       command.markSeed,
+                    fullPage:       command.fullPage
                 }));
 
             case COMMAND_TYPE.takeScreenshotOnFail:
                 return await this._takeScreenshot(() => this.screenshotCapturer.captureError({
                     pageDimensions: driverMsg.pageDimensions,
-                    markSeed:       command.markSeed
+                    markSeed:       command.markSeed,
+                    fullPage:       command.fullPage
                 }));
 
             case COMMAND_TYPE.resizeWindow:

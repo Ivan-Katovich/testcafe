@@ -1,15 +1,37 @@
-const expect = require('chai').expect;
+const nanoid      = require('nanoid');
+const expect      = require('chai').expect;
+const { resolve } = require('path');
 
-const { getClipInfoByCropDimensions, calculateMarkPosition, getClipInfoByMarkPosition, calculateClipInfo } = require('../../lib/screenshots/crop');
+const { writePng, readPng, deleteFile, readPngFile } = require('../../lib/utils/promisified-functions');
 
-function getPngMock () {
+const image          = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==', 'base64');
+const screenshotPath = resolve(process.cwd(), `temp${nanoid(7)}.png`);
+
+const {
+    cropScreenshot,
+    getClipInfoByCropDimensions,
+    calculateMarkPosition,
+    getClipInfoByMarkPosition,
+    calculateClipInfo
+} = require('../../lib/screenshots/crop');
+
+const markSeed = [
+    0, 0, 0, 255,
+    255, 255, 255, 255,
+    0, 0, 0, 255,
+    255, 255, 255, 255,
+    0, 0, 0, 255,
+    255, 255, 255, 255
+];
+
+function getPngMock (mark = markSeed) {
     const markSeedIndex = 6944952;
     const width         = 1820;
     const height        = 954;
 
     let data = '-'.repeat(markSeedIndex);
 
-    data = Buffer.from(data + '*' + data);
+    data = Buffer.concat([Buffer.from(data), Buffer.from(mark), Buffer.from(data)]);
 
     return { width, height, data };
 }
@@ -65,7 +87,7 @@ describe('Crop images', () => {
     });
 
     it('Calculate mark position', () => {
-        expect(calculateMarkPosition(getPngMock(), '*')).eql({
+        expect(calculateMarkPosition(getPngMock(), markSeed)).eql({
             x: 1820,
             y: 954
         });
@@ -73,8 +95,20 @@ describe('Crop images', () => {
         expect(calculateMarkPosition(getPngMock(), '+')).eql(null);
     });
 
+    it('Mark seed correction', () => {
+        const fixableMarkSeed = markSeed.slice();
+        const spoiledMarkSeed = markSeed.slice();
+
+        fixableMarkSeed.splice(0, 1, 1);
+        spoiledMarkSeed.splice(0, 1, 10);
+
+        expect(calculateMarkPosition(getPngMock(fixableMarkSeed), markSeed)).eql({ x: 1820, y: 954 });
+        expect(calculateMarkPosition(getPngMock(spoiledMarkSeed), markSeed)).eql(null);
+        expect(calculateMarkPosition(getPngMock(), '+')).eql(null);
+    });
+
     it('Get clipInfo by mark position', () => {
-        const markPosition = calculateMarkPosition(getPngMock(), '*');
+        const markPosition = calculateMarkPosition(getPngMock(), markSeed);
 
         expect(getClipInfoByMarkPosition(markPosition, { width: 1820, height: 954 })).eql({
             clipLeft:   0,
@@ -104,14 +138,14 @@ describe('Crop images', () => {
             bottom: 850
         };
 
-        expect(calculateClipInfo(getPngMock(), 'path', '*', clientAreaDimensions)).eql({
+        expect(calculateClipInfo(getPngMock(), 'path', markSeed, clientAreaDimensions)).eql({
             clipLeft:   0,
             clipTop:    0,
             clipRight:  1820,
             clipBottom: 953
         });
 
-        expect(calculateClipInfo(getPngMock(), 'path', '*', clientAreaDimensions, cropDimensions)).eql({
+        expect(calculateClipInfo(getPngMock(), 'path', markSeed, clientAreaDimensions, cropDimensions)).eql({
             clipLeft:   20,
             clipTop:    20,
             clipRight:  1800,
@@ -134,6 +168,31 @@ describe('Crop images', () => {
                 'Unable to locate the page area in the browser window screenshot at path, ' +
                 'because the page area mark with ID 2147483648 ' +
                 'is not found in the screenshot.');
+        }
+    });
+
+    it('Should not delete screenshot if unable to locate the page area', async () => {
+        let err   = null;
+        const png = await readPng(image);
+
+        await writePng(screenshotPath, png);
+
+        const clientAreaDimensions = { width: 1620, height: 854 };
+
+        try {
+            await cropScreenshot(png, { path: screenshotPath, markSeed: '+', clientAreaDimensions });
+        }
+        catch (e) {
+            err = e;
+        }
+        finally {
+            expect(err.message).contains('Unable to locate the page area in the browser window screenshot');
+
+            const file = await readPngFile(screenshotPath);
+
+            expect(file).is.not.null;
+
+            await deleteFile(screenshotPath);
         }
     });
 });

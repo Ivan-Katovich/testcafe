@@ -3,12 +3,12 @@ const browserUtils  = hammerhead.utils.browser;
 const nativeMethods = hammerhead.nativeMethods;
 
 const testCafeCore      = window.getTestCafeModule('testCafeCore');
-const parseKeySequence  = testCafeCore.get('./utils/parse-key-sequence');
+const parseKeySequence  = testCafeCore.parseKeySequence;
 
 const testCafeAutomation = window.getTestCafeModule('testCafeAutomation');
 const TypeAutomation     = testCafeAutomation.Type;
 const PressAutomation    = testCafeAutomation.Press;
-const TypeOptions        = testCafeAutomation.get('../../test-run/commands/options').TypeOptions;
+const TypeOptions        = testCafeAutomation.TypeOptions;
 
 testCafeCore.preventRealEvents();
 
@@ -286,6 +286,47 @@ $(document).ready(function () {
                     start();
                 });
         });
+
+        asyncTest('change event can be raised after prevented keypress if there are unsaved changes (GH-4881)', function () {
+            const $input = $('<input type="text" />').addClass(TEST_ELEMENT_CLASS).appendTo('body');
+
+            let changed = false;
+
+            $input.bind('change', function () {
+                changed = true;
+            });
+
+            $input.bind('keypress', function (e) {
+                if (e.key === '-') {
+                    e.target.value += String.fromCharCode(e.keyCode);
+                    return false;
+                }
+
+                return true;
+            });
+
+            const firstType = new TypeAutomation($input[0], 'test-', new TypeOptions({ offsetX: 5, offsetY: 5 }));
+
+            firstType
+                .run()
+                .then(function () {
+                    $input[0].blur();
+
+                    ok(changed, 'change event raised on prevented keypress with unsaved data check');
+
+                    changed = false;
+
+                    const secondType = new TypeAutomation($input[0], '---', new TypeOptions({ offsetX: 5, offsetY: 5 }));
+
+                    return secondType.run();
+                })
+                .then(function () {
+                    $input[0].blur();
+
+                    ok(!changed, 'change event not raised on prevented keypress with no unsaved data check');
+                    start();
+                });
+        });
     }
 
     asyncTest('keypress args must contain charCode of the symbol, not keyCode', function () {
@@ -379,6 +420,42 @@ $(document).ready(function () {
             });
     });
 
+    asyncTest('GH-4068 - Type to element wrapped in label', function () {
+        const input1 = document.createElement('input');
+        const input2 = document.createElement('input');
+        const label  = document.createElement('label');
+
+        input1.className = TEST_ELEMENT_CLASS;
+        input2.className = TEST_ELEMENT_CLASS;
+        label.className  = TEST_ELEMENT_CLASS;
+
+        input1.id = 'input-1';
+        input2.id = 'input-2';
+
+        label.setAttribute('for', input2.id);
+
+        label.appendChild(input1);
+        label.appendChild(input2);
+
+        document.body.appendChild(label);
+
+        const type = new TypeAutomation(input1, '12345', {});
+
+        type
+            .run()
+            .then(function () {
+                // NOTE: in safari target input element is not focused on click
+                // it loses its focus immediately after click
+                // so it's impossible to type into it
+                const expected = !browserUtils.isSafari ? '12345' : '';
+
+                equal(input1.value, expected);
+
+                start();
+            });
+
+    });
+
 
     asyncTest('T334620, GH-3282 - Wrong "key" property in keyEvent objects (type)', function () {
         const textarea = document.createElement('textarea');
@@ -462,6 +539,204 @@ $(document).ready(function () {
                     equal(keypressKeyIdentifierProperty, '');
                     equal(keyupKeyIdentifierProperty, expectedKeySequence);
                     equal(textarea.value, 'aA \n');
+                    start();
+                });
+        });
+    }
+
+    if (nativeMethods.WindowInputEvent && !browserUtils.isFirefox) {
+        const expectedAllEvents = [
+            { type: 'beforeinput', data: '1' },
+            { type: 'textInput', data: '1' },
+            { type: 'beforeinput', data: '2' },
+            { type: 'textInput', data: '2' },
+            { type: 'beforeinput', data: '3' },
+            { type: 'textInput', data: '3' },
+        ];
+
+        const expectedAllEventsReversed = [
+            { type: 'textInput', data: '1' },
+            { type: 'beforeinput', data: '1' },
+            { type: 'textInput', data: '2' },
+            { type: 'beforeinput', data: '2' },
+            { type: 'textInput', data: '3' },
+            { type: 'beforeinput', data: '3' }
+        ];
+
+        const expectedOnlyBeforeInput = [
+            { type: 'beforeinput', data: '1' },
+            { type: 'beforeinput', data: '2' },
+            { type: 'beforeinput', data: '3' }
+        ];
+
+        const expectedOnlyTextInput = [
+            { type: 'textInput', data: '1' },
+            { type: 'textInput', data: '2' },
+            { type: 'textInput', data: '3' }
+        ];
+
+        asyncTest('Should fire `beforeInput` event', function () {
+            const input1 = document.createElement('input');
+            const input2 = document.createElement('input');
+            const input3 = document.createElement('input');
+
+            input1.className = TEST_ELEMENT_CLASS;
+            input2.className = TEST_ELEMENT_CLASS;
+            input3.className = TEST_ELEMENT_CLASS;
+
+            document.body.appendChild(input1);
+            document.body.appendChild(input2);
+            document.body.appendChild(input3);
+
+            const log1 = [];
+            const log2 = [];
+            const log3 = [];
+
+            function logEvents (e, log) {
+                log.push({ type: e.type, data: e.data });
+            }
+
+            input1.addEventListener('beforeinput', function (e) {
+                logEvents(e, log1);
+            });
+
+            input1.addEventListener('textInput', function (e) {
+                logEvents(e, log1);
+            });
+
+            input2.addEventListener('beforeinput', function (e) {
+                logEvents(e, log2);
+
+                e.preventDefault();
+            });
+
+            input2.addEventListener('textInput', function (e) {
+                logEvents(e, log2);
+            });
+
+            input3.addEventListener('beforeinput', function (e) {
+                logEvents(e, log3);
+            });
+
+            input3.addEventListener('textInput', function (e) {
+                logEvents(e, log3);
+
+                e.preventDefault();
+            });
+
+            const automation1 = new TypeAutomation(input1, '123', new TypeOptions());
+            const automation2 = new TypeAutomation(input2, '123', new TypeOptions());
+            const automation3 = new TypeAutomation(input3, '123', new TypeOptions());
+
+            return automation1.run()
+                .then(function () {
+                    return automation2.run();
+                })
+                .then(function () {
+                    return automation3.run();
+                })
+                .then(function () {
+                    if (browserUtils.isChrome) {
+                        deepEqual(log1, expectedAllEvents);
+                        deepEqual(log2, expectedOnlyBeforeInput);
+                        deepEqual(log3, expectedAllEvents);
+                    }
+
+                    if (browserUtils.isSafari) {
+                        deepEqual(log1, expectedAllEventsReversed);
+                        deepEqual(log2, expectedAllEventsReversed);
+                        deepEqual(log3, expectedOnlyTextInput);
+                    }
+
+                    strictEqual(input1.value, '123');
+                    strictEqual(input2.value, '');
+                    strictEqual(input3.value, '');
+
+                    start();
+                });
+        });
+
+        asyncTest('Should fire `beforeInput` event in contenteditable div', function () {
+            const input1 = document.createElement('div');
+            const input2 = document.createElement('div');
+            const input3 = document.createElement('div');
+
+            input1.contentEditable = true;
+            input2.contentEditable = true;
+            input3.contentEditable = true;
+
+            input1.className = TEST_ELEMENT_CLASS;
+            input2.className = TEST_ELEMENT_CLASS;
+            input3.className = TEST_ELEMENT_CLASS;
+
+            document.body.appendChild(input1);
+            document.body.appendChild(input2);
+            document.body.appendChild(input3);
+
+            const log1 = [];
+            const log2 = [];
+            const log3 = [];
+
+            function logEvents (e, log) {
+                log.push({ type: e.type, data: e.data });
+            }
+
+            input1.addEventListener('beforeinput', function (e) {
+                logEvents(e, log1);
+            });
+
+            input1.addEventListener('textInput', function (e) {
+                logEvents(e, log1);
+            });
+
+            input2.addEventListener('beforeinput', function (e) {
+                logEvents(e, log2);
+
+                e.preventDefault();
+            });
+
+            input2.addEventListener('textInput', function (e) {
+                logEvents(e, log2);
+            });
+
+            input3.addEventListener('beforeinput', function (e) {
+                logEvents(e, log3);
+            });
+
+            input3.addEventListener('textInput', function (e) {
+                logEvents(e, log3);
+
+                e.preventDefault();
+            });
+
+            const automation1 = new TypeAutomation(input1, '123', new TypeOptions());
+            const automation2 = new TypeAutomation(input2, '123', new TypeOptions());
+            const automation3 = new TypeAutomation(input3, '123', new TypeOptions());
+
+            return automation1.run()
+                .then(function () {
+                    return automation2.run();
+                })
+                .then(function () {
+                    return automation3.run();
+                })
+                .then(function () {
+                    if (browserUtils.isChrome) {
+                        deepEqual(log1, expectedAllEvents);
+                        deepEqual(log2, expectedOnlyBeforeInput);
+                        deepEqual(log3, expectedAllEvents);
+                    }
+
+                    if (browserUtils.isSafari) {
+                        deepEqual(log1, expectedAllEventsReversed);
+                        deepEqual(log2, expectedAllEventsReversed);
+                        deepEqual(log3, expectedOnlyTextInput);
+                    }
+
+                    strictEqual(input1.innerText, '123');
+                    strictEqual(input2.innerText, '');
+                    strictEqual(input3.innerText, '');
+
                     start();
                 });
         });

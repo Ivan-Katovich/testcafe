@@ -53,7 +53,8 @@ export function isServiceCommand (command) {
            command.type === TYPE.showAssertionRetriesStatus ||
            command.type === TYPE.hideAssertionRetriesStatus ||
            command.type === TYPE.setBreakpoint ||
-           command.type === TYPE.takeScreenshotOnFail;
+           command.type === TYPE.takeScreenshotOnFail ||
+           command.type === TYPE.recorder;
 }
 
 export function isExecutableInTopWindowOnly (command) {
@@ -79,5 +80,6 @@ export function isExecutableOnClientCommand (command) {
            command.type !== TYPE.debug &&
            command.type !== TYPE.useRole &&
            command.type !== TYPE.assertion &&
-           command.type !== TYPE.executeExpression;
+           command.type !== TYPE.executeExpression &&
+           command.type !== TYPE.executeAsyncExpression;
 }

@@ -3,6 +3,7 @@ import TEMPLATES from './templates';
 import createStackFilter from '../create-stack-filter';
 import { getCallsiteForMethod } from '../get-callsite';
 import renderTemplate from '../../utils/render-template';
+import renderCallsiteSync from '../../utils/render-callsite-sync';
 import { RUNTIME_ERRORS } from '../types';
 
 const ERROR_SEPARATOR = '\n\n';
@@ -35,7 +36,7 @@ export class TestCompilationError extends Error {
 
         Object.assign(this, {
             code: RUNTIME_ERRORS.cannotPrepareTestsDueToError,
-            data: [ errorMessage ]
+            data: [errorMessage]
         });
 
         // NOTE: stack includes message as well.
@@ -56,8 +57,8 @@ export class APIError extends Error {
         Object.assign(this, { code, data: args });
 
         // NOTE: `rawMessage` is used in error substitution if it occurs in test run.
-        this.rawMessage  = rawMessage;
-        this.callsite    = getCallsiteForMethod(methodName);
+        this.rawMessage = rawMessage;
+        this.callsite   = getCallsiteForMethod(methodName);
 
         // NOTE: We need property getters here because callsite can be replaced by an external code.
         // See https://github.com/DevExpress/testcafe/blob/v1.0.0/src/compiler/test-file/formats/raw.js#L22
@@ -74,25 +75,11 @@ export class APIError extends Error {
         });
     }
 
-    _renderCallsite (renderer) {
-        if (!this.callsite)
-            return '';
-
-        // NOTE: Callsite will throw during rendering if it can't find a target file for the specified function or method:
-        // https://github.com/inikulin/callsite-record/issues/2#issuecomment-223263941
-        try {
-            return this.callsite.renderSync({
-                renderer:    renderer,
-                stackFilter: createStackFilter(Error.stackTraceLimit)
-            });
-        }
-        catch (error) {
-            return '';
-        }
-    }
-
     _createStack (renderer) {
-        const renderedCallsite = this._renderCallsite(renderer);
+        const renderedCallsite = renderCallsiteSync(this.callsite, {
+            renderer:    renderer,
+            stackFilter: createStackFilter(Error.stackTraceLimit)
+        });
 
         if (!renderedCallsite)
             return this.message;
@@ -126,5 +113,19 @@ export class CompositeError extends Error {
 
         this.stack = errors.map(({ stack }) => stack).join(ERROR_SEPARATOR);
         this.code  = RUNTIME_ERRORS.compositeArgumentsError;
+    }
+}
+
+export class ReporterPluginError extends GeneralError {
+    constructor ({ name, method, originalError }) {
+        const code = RUNTIME_ERRORS.uncaughtErrorInReporter;
+
+        super(code, name, method, originalError.stack);
+    }
+}
+
+export class TimeoutError extends GeneralError {
+    constructor () {
+        super(RUNTIME_ERRORS.timeLimitedPromiseTimeoutExpired);
     }
 }

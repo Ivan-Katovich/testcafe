@@ -7,9 +7,11 @@ skip_commits:
 branches:
   except:
   - new-docs
+  - /^\(testbot-only\)/
 
 environment:
   NODEJS_VERSION: "10"
+  RETRY_FAILED_TESTS: "true"
 
   matrix:
     - GULP_TASK: "test-functional-local-ie"

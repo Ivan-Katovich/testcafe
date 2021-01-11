@@ -5,9 +5,11 @@
         "name": "xunit",
         "output": "reports/report.xml"
     },
-    "screenshotPath": "/home/user/tests/screenshots/",
-    "screenshotPathPattern": "${DATE}_${TIME}/test-${TEST_INDEX}/${USERAGENT}/${FILE_INDEX}.png",
-    "takeScreenshotsOnFails": true,
+    "screenshots": {
+        "path": "/home/user/tests/screenshots/",
+        "takeOnFails": true,
+        "pathPattern": "${DATE}_${TIME}/test-${TEST_INDEX}/${USERAGENT}/${FILE_INDEX}.png"
+    },
     "videoPath": "reports/screen-captures",
     "videoOptions": {
         "singleFile": true,
@@ -18,7 +20,7 @@
         "r": 20,
         "aspect": "4:3"
     },
-    "quarantineMode": true,
+    "quarantineMode": false,
     "debugMode": true,
     "debugOnFail": true,
     "stopOnFirstFail": true,
@@ -45,6 +47,14 @@
     "assertionTimeout": 1000,
     "pageLoadTimeout": 1000,
     "speed": 0.1,
+    "clientScripts": [
+        {
+            "module": "lodash"
+        },
+        {
+            "path": "scripts/react-helpers.js"
+        }
+    ],
     "port1": 12345,
     "port2": 54321,
     "hostname": "host.mycorp.com",
@@ -54,6 +64,8 @@
         "pfx": "path/to/file.pfx",
         "rejectUnauthorized": true
     },
-    "developmentMode": true,
+    "tsConfigPath": "/Users/s.johnson/testcafe/tsconfig.json",
+    "disablePageCaching": false,
+    "developmentMode": false,
     "qrCode": true
 }

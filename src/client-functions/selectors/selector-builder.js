@@ -10,10 +10,13 @@ import { ExecuteSelectorCommand } from '../../test-run/commands/observation';
 import defineLazyProperty from '../../utils/define-lazy-property';
 import { addAPI, addCustomMethods } from './add-api';
 import createSnapshotMethods from './create-snapshot-methods';
+import prepareApiFnArgs from './prepare-api-args';
+import returnSinglePropMode from '../return-single-prop-mode';
 
 export default class SelectorBuilder extends ClientFunctionBuilder {
     constructor (fn, options, callsiteNames) {
         const apiFn                        = options && options.apiFn;
+        const apiFnID                      = options && options.apiFnID;
         const builderFromSelector          = fn && fn[functionBuilderSymbol];
         const builderFromPromiseOrSnapshot = fn && fn.selector && fn.selector[functionBuilderSymbol];
         let builder                        = builderFromSelector || builderFromPromiseOrSnapshot;
@@ -41,7 +44,7 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
         if (apiFn)
             this.options.apiFnChain.push(apiFn);
 
-        this.options.apiFnID = this.options.apiFnChain.length - 1;
+        this.options.apiFnID = typeof apiFnID === 'number' ? apiFnID : this.options.apiFnChain.length - 1;
     }
 
     _getCompiledFnCode () {
@@ -66,10 +69,10 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
                     return function(){
                         var args           = __dependencies$.boundArgs || arguments;
                         var selectorFilter = window['%testCafeSelectorFilter%'];
-                        
+
                         var nodes = __f$.apply(this, args);
                         nodes     = selectorFilter.cast(nodes);
-                        
+
                         if (!nodes.length && !selectorFilter.error)
                             selectorFilter.error = __dependencies$.apiInfo.apiFnID;
 
@@ -114,6 +117,7 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
             filterHidden,
             counterMode,
             collectionMode,
+            getVisibleValueMode,
             index,
             customDOMProperties,
             customMethods,
@@ -127,7 +131,8 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
                 filterHidden,
                 counterMode,
                 collectionMode,
-                index: isNullOrUndefined(index) ? null : index
+                index: isNullOrUndefined(index) ? null : index,
+                getVisibleValueMode
             },
             apiInfo: {
                 apiFnChain,
@@ -181,13 +186,27 @@ export default class SelectorBuilder extends ClientFunctionBuilder {
     _decorateFunction (selectorFn) {
         super._decorateFunction(selectorFn);
 
-        addAPI(selectorFn, () => selectorFn, SelectorBuilder, this.options.customDOMProperties, this.options.customMethods);
+        addAPI(
+            selectorFn,
+            () => selectorFn,
+            SelectorBuilder,
+            this.options.customDOMProperties,
+            this.options.customMethods,
+            this._getTestRun() ? this._getTestRun().observedCallsites : null
+        );
+    }
+
+    _getClientFnWithOverriddenOptions (options) {
+        const apiFn              = prepareApiFnArgs('with', options);
+        const previousSelectorID = this.options.apiFnChain.length - 1;
+
+        return super._getClientFnWithOverriddenOptions(Object.assign(options, { apiFn, apiFnID: previousSelectorID }));
     }
 
     _processResult (result, selectorArgs) {
         const snapshot = super._processResult(result, selectorArgs);
 
-        if (snapshot && !this.options.counterMode) {
+        if (snapshot && !returnSinglePropMode(this.options)) {
             this._addBoundArgsSelectorGetter(snapshot, selectorArgs);
             createSnapshotMethods(snapshot);
 

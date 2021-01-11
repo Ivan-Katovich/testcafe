@@ -1,6 +1,5 @@
 const expect               = require('chai').expect;
 const noop                 = require('lodash').noop;
-const Promise              = require('pinkie');
 const path                 = require('path');
 const createTestCafe       = require('../../lib/index');
 const FileWatcher          = require('../../lib/live/file-watcher');
@@ -8,21 +7,23 @@ const LiveModeController   = require('../../lib/live/controller');
 const LiveModeRunner       = require('../../lib/live/test-runner');
 const LiveModeBootstrapper = require('../../lib/live/bootstrapper');
 
+const LiveModeKeyboardEventObserver = require('../../lib/live/keyboard-observer');
+
 const testFileWithSingleTestPath               = path.resolve('test/server/data/test-suites/live/test.js');
 const testFileWithMultipleTestsPath            = path.resolve('test/server/data/test-suites/live/multiple-tests.js');
 const testFileWithSyntaxErrorPath              = path.resolve('test/server/data/test-suites/live/test-with-syntax-error.js');
 const testFileWithExternalModulePath           = path.resolve('test/server/data/test-suites/live/test-external-module.js');
+const testFileWithExternalModuleRerunPath      = path.resolve('test/server/data/test-suites/live/test-external-module-rerun.js');
 const testFileWithExternalUnexistingModulePath = path.resolve('test/server/data/test-suites/live/test-external-unexisting-module.js');
 
-const externalModulePath = path.resolve('test/server/data/test-suites/live/module.js');
+const externalModulePath         = path.resolve('test/server/data/test-suites/live/module.js');
+const externalCommonJsModulePath = path.resolve('test/server/data/test-suites/live/commonjs-module.js');
+
+const DOCKER_TESTCAFE_FOLDER_REGEXP = /^\/usr\/lib\/node_modules\/testcafe/;
 
 class FileWatcherMock extends FileWatcher {
-    constructor (files) {
-        super(files);
-    }
-
-    addFile (file) {
-        if (file.replace(/^\/usr\/lib\/node_modules\/testcafe/, '').indexOf('node_modules') > -1)
+    addFile (controller, file) {
+        if (!FileWatcher.shouldWatchFile(file.replace(DOCKER_TESTCAFE_FOLDER_REGEXP, '')))
             return;
 
         this.files = this.files || [];
@@ -32,6 +33,11 @@ class FileWatcherMock extends FileWatcher {
 }
 
 let errors = [];
+
+class LiveModeKeyboardEventObserverMock extends LiveModeKeyboardEventObserver {
+    _listenKeyEvents () {
+    }
+}
 
 class ControllerMock extends LiveModeController {
     constructor (runner) {
@@ -51,16 +57,12 @@ class ControllerMock extends LiveModeController {
         };
     }
 
-    dispose () {
+    _createKeyboardObserver () {
+        return new LiveModeKeyboardEventObserverMock();
     }
 
-    _createFileWatcher (src) {
-        this.fileWatcher = new FileWatcherMock(src);
-
-        return this.fileWatcher;
-    }
-
-    _listenKeyPress () {
+    _createFileWatcher () {
+        return new FileWatcherMock();
     }
 }
 
@@ -71,10 +73,11 @@ class BootstrapperMock extends LiveModeBootstrapper {
 
     createRunnableConfiguration () {
         return Promise.resolve({
-            reporterPlugins: [],
-            tests:           [],
-            browserSet:      {},
-            testedApp:       {}
+            reporterPlugins:     [],
+            tests:               [],
+            browserSet:          {},
+            testedApp:           {},
+            commonClientScripts: []
         });
     }
 }
@@ -120,6 +123,7 @@ class RunnerMock extends LiveModeRunner {
     _validateScreenshotOptions () {
         if (this.errorOnValidate)
             throw new Error('validationError');
+
         super._validateScreenshotOptions();
     }
 
@@ -133,6 +137,8 @@ class RunnerMock extends LiveModeRunner {
                 return super.runTests();
             })
             .then(() => {
+                this.emit('tests-completed');
+
                 this.stopInfiniteWaiting();
             });
     }
@@ -189,6 +195,10 @@ describe('TestCafe Live', function () {
 
     beforeEach(function () {
         errors = [];
+
+        const observer = new LiveModeKeyboardEventObserverMock();
+
+        observer.controllers = [];
     });
 
     it('run', function () {
@@ -196,10 +206,10 @@ describe('TestCafe Live', function () {
             .then(() => {
                 expect(runner.runCount).eql(1);
 
-                const { tests } = runner.liveConfigurationCache;
+                const { tests } = runner.configurationCache;
 
                 expect(tests.length).eql(1);
-                expect(tests[0].name).eql('test1');
+                expect(tests[0].name).eql('basic');
                 expect(runner.disposed).eql(true);
                 expect(runner.watchedFiles).eql([testFileWithSingleTestPath]);
             });
@@ -208,10 +218,28 @@ describe('TestCafe Live', function () {
     it('rerun', function () {
         return runTests(testFileWithSingleTestPath)
             .then(() => {
-                return runner.controller._restart()
+                return runner.controller.restart()
                     .then(() => {
                         expect(runner.runCount).eql(2);
                     });
+            });
+    });
+
+    it('rerun with require', function () {
+        return runTests(testFileWithExternalModuleRerunPath)
+            .then(() => {
+                let err = null;
+
+                runner.controller.fileWatcher._onChanged(runner.controller, externalCommonJsModulePath);
+
+                try {
+                    require(externalCommonJsModulePath);
+                }
+                catch (e) {
+                    err = e;
+                }
+
+                expect(err).is.null;
             });
     });
 
@@ -221,26 +249,28 @@ describe('TestCafe Live', function () {
                 runner.src(testFileWithMultipleTestsPath);
             })
             .then(() => {
-                return runner.controller._restart();
+                return runner.controller.restart();
             })
             .then(() => {
                 expect(runner.runCount).eql(2);
 
-                const tests = runner.liveConfigurationCache.tests;
+                const tests = runner.configurationCache.tests;
 
                 expect(tests.length).eql(2);
-                expect(tests[0].name).eql('test2');
-                expect(tests[1].name).eql('test3');
+                expect(tests[0].name).eql('multiple 1');
+                expect(tests[1].name).eql('multiple 2');
                 expect(runner.testRunController.expectedTestCount).eql(2);
             });
     });
 
     it('rerun uncompilable', function () {
+        expect(errors.length).eql(0);
+
         return runTests(testFileWithSingleTestPath)
             .then(() => {
                 runner.src(testFileWithSyntaxErrorPath);
 
-                return runner.controller._restart();
+                return runner.controller.restart();
             })
             .then(() => {
                 expect(errors.length).eql(1);
@@ -251,21 +281,21 @@ describe('TestCafe Live', function () {
                 runner.clearSources();
                 runner.src(testFileWithSingleTestPath);
 
-                return runner.controller._restart();
+                return runner.controller.restart();
             })
             .then(() => {
                 expect(runner.runCount).eql(3);
                 expect(errors.length).eql(1);
 
-                const tests = runner.liveConfigurationCache.tests;
+                const tests = runner.configurationCache.tests;
 
                 expect(tests.length).eql(1);
-                expect(tests[0].name).eql('test1');
+                expect(tests[0].name).eql('basic');
 
                 runner.clearSources();
                 runner.src(testFileWithSyntaxErrorPath);
 
-                return runner.controller._restart();
+                return runner.controller.restart();
             })
             .then(() => {
                 expect(runner.runCount).eql(4);
@@ -315,23 +345,51 @@ describe('TestCafe Live', function () {
     });
 
     it('same runner runs twice', function () {
+        this.timeout(6000);
+
+        runner = new RunnerMock(testCafe, {})
+            .browsers('chrome');
+
+        const promise = runner.run();
+
         try {
-            runner = new RunnerMock(testCafe, {});
-
-            runner.browsers('chrome');
-
-            runner.run();
             runner.run();
         }
         catch (err) {
             expect(err.message.indexOf('Cannot run a live mode runner multiple times') > -1).to.be.true;
         }
+
+        return promise;
     });
 
     it('error on validate', function () {
         return runTests(testFileWithSingleTestPath, { errorOnValidate: true })
             .catch(err => {
                 expect(err.message.indexOf('validationError') > -1).to.be.true;
+            });
+    });
+
+    it('Keyboard event observer stopped after run', function () {
+        let counter = 0;
+
+        runner = new RunnerMock(testCafe, {});
+
+        runner.once('tests-completed', () => {
+            counter++;
+
+            expect(runner.controller.keyboardObserver.controllers.length).eql(1);
+        });
+
+        return runner
+            .src(testFileWithSingleTestPath)
+            .browsers('chrome')
+            .run()
+            .then(() => {
+                counter++;
+                expect(runner.controller.keyboardObserver.controllers.length).eql(0);
+            })
+            .then(() => {
+                expect(counter).eql(2);
             });
     });
 
@@ -346,7 +404,7 @@ describe('TestCafe Live', function () {
 
                     expect(runner.runCount).eql(1);
 
-                    return runner.controller._restart();
+                    return runner.controller.restart();
                 })
                 .then(() => {
                     expect(runner.runCount).eql(2);
@@ -358,12 +416,12 @@ describe('TestCafe Live', function () {
                 .then(() => {
                     expect(runner.runCount).eql(1);
 
-                    runner.controller._restart();
+                    runner.controller.restart();
 
                     expect(runner.controller.restarting).eql(false);
                     expect(runner.controller.running).eql(true);
 
-                    runner.controller._restart();
+                    runner.controller.restart();
 
                     expect(runner.controller.restarting).eql(true);
                     expect(runner.controller.running).eql(true);
@@ -376,9 +434,9 @@ describe('TestCafe Live', function () {
             return runTests(testFileWithSingleTestPath, { runTimeout: 100 })
                 .then(() => {
                     expect(runner.runCount).eql(1);
-                    runner.controller._restart();
+                    runner.controller.restart();
 
-                    return runner.controller._stop();
+                    return runner.controller.stop();
                 })
                 .then(() => {
                     expect(runner.runCount).eql(1);
@@ -392,16 +450,16 @@ describe('TestCafe Live', function () {
                 .then(() => {
                     expect(runner.runCount).eql(1);
 
-                    runner.controller._toggleWatching();
+                    runner.controller.toggleWatching();
 
-                    return runner.controller._restart();
+                    return runner.controller.restart();
                 })
                 .then(() => {
                     expect(runner.runCount).eql(1);
 
-                    runner.controller._toggleWatching();
+                    runner.controller.toggleWatching();
 
-                    return runner.controller._restart();
+                    return runner.controller.restart();
                 })
                 .then(() => {
                     expect(runner.runCount).eql(2);

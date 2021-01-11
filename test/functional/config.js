@@ -1,7 +1,7 @@
 const os = require('os');
 
-const isTravisEnvironment = !!process.env.TRAVIS;
-const hostname            = isTravisEnvironment ? os.hostname() : '127.0.0.1';
+const isAzureEnvironment = !!process.env.TF_BUILD;
+const hostname           = isAzureEnvironment ? os.hostname() : '127.0.0.1';
 
 const browserProviderNames = {
     sauceLabs:    'sauceLabs',
@@ -15,24 +15,23 @@ const testingEnvironmentNames = {
     localBrowsersIE:             'local-browsers-ie',
     localBrowsersChromeFirefox:  'local-browsers-chrome-firefox',
     localBrowsers:               'local-browsers',
+    localChrome:                 'local-chrome',
     localHeadlessChrome:         'local-headless-chrome',
     localHeadlessFirefox:        'local-headless-firefox',
     remote:                      'remote',
-    oldBrowsers:                 'old-browsers',
     legacy:                      'legacy'
 };
 
 const testingEnvironments = {};
 
 testingEnvironments[testingEnvironmentNames.osXDesktopAndMSEdgeBrowsers] = {
-    jobName: 'functional tests - OS X desktop and MS edge browsers',
+    jobName:  'functional tests - OS X desktop and MS edge browsers',
+    provider: browserProviderNames.browserstack,
 
     browserstack: {
         username:  process.env.BROWSER_STACK_USERNAME,
         accessKey: process.env.BROWSER_STACK_ACCESS_KEY
     },
-
-    retryTestPages: true,
 
     browsers: [
         {
@@ -40,25 +39,28 @@ testingEnvironments[testingEnvironmentNames.osXDesktopAndMSEdgeBrowsers] = {
             alias:       'safari'
         },
         {
-            browserName: 'browserstack:chrome@71:OS X High Sierra',
+            browserName: 'browserstack:chrome@80:OS X High Sierra',
             alias:       'chrome-osx'
         },
         {
-            browserName: 'browserstack:firefox@64:OS X High Sierra',
+            browserName: 'browserstack:firefox@72:OS X High Sierra',
             alias:       'firefox-osx'
+        },
+        {
+            browserName: 'browserstack:edge:OS X High Sierra',
+            alias:       'edge'
         }
     ]
 };
 
 testingEnvironments[testingEnvironmentNames.mobileBrowsers] = {
-    jobName: 'functional tests - mobile browsers',
+    jobName:  'functional tests - mobile browsers',
+    provider: browserProviderNames.browserstack,
 
     browserstack: {
         username:  process.env.BROWSER_STACK_USERNAME,
         accessKey: process.env.BROWSER_STACK_ACCESS_KEY
     },
-
-    retryTestPages: true,
 
     browsers: [
         {
@@ -95,10 +97,20 @@ testingEnvironments[testingEnvironmentNames.localBrowsers] = {
     ]
 };
 
-testingEnvironments[testingEnvironmentNames.localBrowsersIE] = {
+testingEnvironments[testingEnvironmentNames.localChrome] = {
     isLocalBrowsers: true,
 
-    retryTestPages: true,
+    browsers: [
+        {
+            platform:    'Windows 10',
+            browserName: 'chrome',
+            alias:       'chrome'
+        }
+    ]
+};
+
+testingEnvironments[testingEnvironmentNames.localBrowsersIE] = {
+    isLocalBrowsers: true,
 
     browsers: [
         {
@@ -159,7 +171,8 @@ testingEnvironments[testingEnvironmentNames.localHeadlessFirefox] = {
 };
 
 testingEnvironments[testingEnvironmentNames.remote] = {
-    remote: true,
+    remote:   true,
+    provider: browserProviderNames.remote,
 
     browsers: [{
         get qrCode () {
@@ -170,33 +183,6 @@ testingEnvironments[testingEnvironmentNames.remote] = {
             return process.env.BROWSER_ALIAS || 'chrome';
         }
     }]
-};
-
-testingEnvironments[testingEnvironmentNames.oldBrowsers] = {
-    jobName: 'functional tests - ms desktop browsers',
-
-    sauceLabs: {
-        username:  process.env.SAUCE_USERNAME_FUNCTIONAL_DESKTOP,
-        accessKey: process.env.SAUCE_ACCESS_KEY_FUNCTIONAL_DESKTOP,
-
-    },
-
-    retryTestPages: true,
-
-    browsers: [
-        {
-            platform:    'Windows 8',
-            browserName: 'internet explorer',
-            version:     '10.0',
-            alias:       'ie 10'
-        },
-        {
-            platform:    'Windows 7',
-            browserName: 'internet explorer',
-            version:     '9.0',
-            alias:       'ie 9'
-        }
-    ]
 };
 
 testingEnvironments[testingEnvironmentNames.legacy] = {
@@ -212,7 +198,6 @@ testingEnvironments[testingEnvironmentNames.legacy] = {
         }
     ]
 };
-
 
 module.exports = {
     get currentEnvironmentName () {
@@ -243,7 +228,7 @@ module.exports = {
         return this.currentEnvironment.retryTestPages;
     },
 
-    isTravisEnvironment,
+    isAzureEnvironment,
 
     testingEnvironmentNames,
     testingEnvironments,

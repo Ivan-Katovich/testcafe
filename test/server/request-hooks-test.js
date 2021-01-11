@@ -2,7 +2,6 @@ const { RequestFilterRule }                       = require('testcafe-hammerhead
 const testRunTracker                              = require('../../lib/api/test-run-tracker');
 const exportableLib                               = require('../../lib/api/exportable-lib');
 const { RequestMock, RequestLogger, RequestHook } = exportableLib;
-const Promise                                     = require('pinkie');
 const nanoid                                      = require('nanoid');
 const { expect }                                  = require('chai');
 
@@ -60,8 +59,10 @@ describe('RequestLogger', () => {
             const requests = getLoggerRequests();
 
             expect(requests.length).eql(1);
+            expect(requests[0].request.timestamp).to.be.a('number');
             expect(requests[0].request.headers).to.be.undefined;
             expect(requests[0].request.body).to.be.undefined;
+            expect(requests[0].response.timestamp).to.be.a('number');
             expect(requests[0].response.headers).to.be.undefined;
             expect(requests[0].response.body).to.be.undefined;
         });

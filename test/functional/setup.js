@@ -1,5 +1,4 @@
 const path                       = require('path');
-const Promise                    = require('pinkie');
 const SlConnector                = require('saucelabs-connector');
 const BsConnector                = require('browserstack-connector');
 const caller                     = require('caller');
@@ -12,6 +11,7 @@ const site                       = require('./site');
 const RemoteConnector            = require('./remote-connector');
 const getTestError               = require('./get-test-error.js');
 const { createSimpleTestStream } = require('./utils/stream');
+const BrowserConnectionStatus    = require('../../lib/browser/connection/status');
 
 let testCafe     = null;
 let browsersInfo = null;
@@ -29,7 +29,7 @@ const FUNCTIONAL_TESTS_ASSERTION_TIMEOUT = 1000;
 const FUNCTIONAL_TESTS_PAGE_LOAD_TIMEOUT = 0;
 
 const environment     = config.currentEnvironment;
-const browserProvider = process.env.BROWSER_PROVIDER;
+const browserProvider = config.currentEnvironment.provider;
 const isBrowserStack  = browserProvider === config.browserProviderNames.browserstack;
 
 config.browsers = environment.browsers;
@@ -103,7 +103,9 @@ function openRemoteBrowsers () {
 }
 
 function waitUtilBrowserConnectionOpened (connection) {
-    const connectedPromise = connection.opened ? Promise.resolve() : promisifyEvent(connection, 'opened');
+    const connectedPromise = connection.status === BrowserConnectionStatus.opened
+        ? Promise.resolve()
+        : promisifyEvent(connection, 'opened');
 
     return connectedPromise
         .then(() => {
@@ -142,7 +144,19 @@ before(function () {
 
     const { devMode, retryTestPages } = config;
 
-    return createTestCafe(config.testCafe.hostname, config.testCafe.port1, config.testCafe.port2, null, devMode, retryTestPages)
+    const testCafeOptions = {
+        hostname: config.testCafe.hostname,
+        port1:    config.testCafe.port1,
+        port2:    config.testCafe.port2,
+
+        developmentMode: devMode,
+
+        retryTestPages,
+
+        experimentalCompilerService: !!process.env.EXPERIMENTAL_COMPILER_SERVICE
+    };
+
+    return createTestCafe(testCafeOptions)
         .then(function (tc) {
             testCafe = tc;
 
@@ -173,33 +187,44 @@ before(function () {
             global.testReport = null;
             global.testCafe   = testCafe;
 
-            global.runTests = (fixture, testName, opts) => {
+            global.runTests = (fixture, testName, opts = {}) => {
                 const stream                      = createSimpleTestStream();
                 const runner                      = testCafe.createRunner();
                 const fixturePath                 = typeof fixture !== 'string' ||
                                                     path.isAbsolute(fixture) ? fixture : path.join(path.dirname(caller()), fixture);
-                const skipJsErrors                = opts && opts.skipJsErrors;
-                const disablePageReloads          = opts && opts.disablePageReloads;
-                const quarantineMode              = opts && opts.quarantineMode;
                 const selectorTimeout             = opts && opts.selectorTimeout || FUNCTIONAL_TESTS_SELECTOR_TIMEOUT;
                 const assertionTimeout            = opts && opts.assertionTimeout || FUNCTIONAL_TESTS_ASSERTION_TIMEOUT;
                 const pageLoadTimeout             = opts && opts.pageLoadTimeout || FUNCTIONAL_TESTS_PAGE_LOAD_TIMEOUT;
-                const onlyOption                  = opts && opts.only;
-                const skipOption                  = opts && opts.skip;
                 const screenshotPath              = opts && opts.setScreenshotPath ? config.testScreenshotsDir : '';
-                const screenshotPathPattern       = opts && opts.screenshotPathPattern;
-                const screenshotsOnFails          = opts && opts.screenshotsOnFails;
                 const videoPath                   = opts && opts.setVideoPath ? config.testVideosDir : '';
-                const videoOptions                = opts && opts.videoOptions;
-                const videoEncodingOptions        = opts && opts.videoEncodingOptions;
-                const speed                       = opts && opts.speed;
-                const appCommand                  = opts && opts.appCommand;
-                const appInitDelay                = opts && opts.appInitDelay;
-                const proxy                       = opts && opts.useProxy;
-                const proxyBypass                 = opts && opts.proxyBypass;
-                const customReporters             = opts && opts.reporter;
-                const skipUncaughtErrors          = opts && opts.skipUncaughtErrors;
-                const stopOnFirstFail             = opts && opts.stopOnFirstFail;
+                const clientScripts               = opts && opts.clientScripts || [];
+                const compilerOptions             = opts && opts.compilerOptions;
+
+                const {
+                    skipJsErrors,
+                    quarantineMode,
+                    screenshotPathPattern,
+                    screenshotsOnFails,
+                    screenshotsFullPage,
+                    videoOptions,
+                    videoEncodingOptions,
+                    speed,
+                    appCommand,
+                    appInitDelay,
+                    proxyBypass,
+                    skipUncaughtErrors,
+                    reporter: customReporters,
+                    useProxy: proxy,
+                    only: onlyOption,
+                    skip: skipOption,
+                    stopOnFirstFail,
+                    disablePageCaching,
+                    disablePageReloads,
+                    disableScreenshots,
+                    disableMultipleWindows,
+                    pageRequestTimeout,
+                    ajaxRequestTimeout
+                } = opts;
 
                 const actualBrowsers = browsersInfo.filter(browserInfo => {
                     const { alias, userAgent } = browserInfo.settings;
@@ -211,7 +236,8 @@ before(function () {
                 });
 
                 if (!actualBrowsers.length) {
-                    mocha.test.skip();
+                    global.currentTest.skip();
+
                     return Promise.resolve();
                 }
 
@@ -242,19 +268,26 @@ before(function () {
                         return testName ? test === testName : true;
                     })
                     .src(fixturePath)
-                    .screenshots(screenshotPath, screenshotsOnFails, screenshotPathPattern)
+                    .screenshots(screenshotPath, screenshotsOnFails, screenshotPathPattern, screenshotsFullPage)
                     .video(videoPath, videoOptions, videoEncodingOptions)
                     .startApp(appCommand, appInitDelay)
+                    .clientScripts(clientScripts)
+                    .compilerOptions(compilerOptions)
                     .run({
                         skipJsErrors,
-                        disablePageReloads,
                         quarantineMode,
                         selectorTimeout,
                         assertionTimeout,
                         pageLoadTimeout,
                         speed,
                         stopOnFirstFail,
-                        skipUncaughtErrors
+                        skipUncaughtErrors,
+                        disablePageCaching,
+                        disablePageReloads,
+                        disableScreenshots,
+                        disableMultipleWindows,
+                        pageRequestTimeout,
+                        ajaxRequestTimeout
                     })
                     .then(failedCount => {
                         if (customReporters)
@@ -266,7 +299,7 @@ before(function () {
                             taskReport.fixtures[0].tests[0] :
                             taskReport;
 
-                        testReport.warnings   = taskReport.warnings;
+                        testReport.warnings    = taskReport.warnings;
                         testReport.failedCount = failedCount;
 
                         global.testReport = testReport;
@@ -276,6 +309,10 @@ before(function () {
                     .catch(handleError);
             };
         });
+});
+
+beforeEach(function () {
+    global.currentTest = this.currentTest;
 });
 
 after(function () {
@@ -293,10 +330,4 @@ after(function () {
 
     return closeLocalBrowsers();
 });
-
-// TODO: Run takeScreenshot tests first because other tests heavily impact them
-if (config.useLocalBrowsers && !config.isLegacyEnvironment) {
-    require('./fixtures/api/es-next/take-screenshot/test');
-    require('./fixtures/screenshots-on-fails/test');
-}
 

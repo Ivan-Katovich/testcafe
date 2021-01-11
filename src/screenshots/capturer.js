@@ -1,16 +1,24 @@
-import { join as joinPath, dirname, basename } from 'path';
+import {
+    join as joinPath,
+    dirname,
+    basename
+} from 'path';
+
 import { generateThumbnail } from 'testcafe-browser-tools';
 import { cropScreenshot } from './crop';
-import makeDir from 'make-dir';
 import { isInQueue, addToQueue } from '../utils/async-queue';
 import WARNING_MESSAGE from '../notifications/warning-message';
 import escapeUserAgent from '../utils/escape-user-agent';
 import correctFilePath from '../utils/correct-file-path';
-import { readPngFile, deleteFile, stat, writePng } from '../utils/promisified-functions';
+import {
+    readPngFile,
+    stat,
+    writePng
+} from '../utils/promisified-functions';
 
 
 export default class Capturer {
-    constructor (baseScreenshotsPath, testEntry, connection, pathPattern, warningLog) {
+    constructor (baseScreenshotsPath, testEntry, connection, pathPattern, fullPage, warningLog) {
         this.enabled             = !!baseScreenshotsPath;
         this.baseScreenshotsPath = baseScreenshotsPath;
         this.testEntry           = testEntry;
@@ -18,6 +26,7 @@ export default class Capturer {
         this.browserId           = connection.id;
         this.warningLog          = warningLog;
         this.pathPattern         = pathPattern;
+        this.fullPage            = fullPage;
     }
 
     static _getDimensionWithoutScrollbar (fullDimension, documentDimension, bodyDimension) {
@@ -101,12 +110,11 @@ export default class Capturer {
         return joinPath(imageDir, 'thumbnails', imageName);
     }
 
-    async _takeScreenshot (filePath, pageWidth, pageHeight) {
-        await makeDir(dirname(filePath));
-        await this.provider.takeScreenshot(this.browserId, filePath, pageWidth, pageHeight);
+    async _takeScreenshot ({ filePath, pageWidth, pageHeight, fullPage = this.fullPage }) {
+        await this.provider.takeScreenshot(this.browserId, filePath, pageWidth, pageHeight, fullPage);
     }
 
-    async _capture (forError, { pageDimensions, cropDimensions, markSeed, customPath } = {}) {
+    async _capture (forError, { pageDimensions, cropDimensions, markSeed, customPath, fullPage } = {}) {
         if (!this.enabled)
             return null;
 
@@ -119,40 +127,47 @@ export default class Capturer {
         await addToQueue(screenshotPath, async () => {
             const clientAreaDimensions = Capturer._getClientAreaDimensions(pageDimensions);
 
-            await this._takeScreenshot(screenshotPath, ...clientAreaDimensions ? [clientAreaDimensions.width, clientAreaDimensions.height] : []);
+            const { width: pageWidth, height: pageHeight } = clientAreaDimensions || {};
+
+            const takeScreenshotOptions = {
+                filePath: screenshotPath,
+                pageWidth,
+                pageHeight,
+                fullPage
+            };
+
+            await this._takeScreenshot(takeScreenshotOptions);
 
             if (!await Capturer._isScreenshotCaptured(screenshotPath))
                 return;
 
-            try {
-                const image = await readPngFile(screenshotPath);
+            const image = await readPngFile(screenshotPath);
 
-                const croppedImage = await cropScreenshot(image, {
-                    markSeed,
-                    clientAreaDimensions,
+            const croppedImage = await cropScreenshot(image, {
+                markSeed,
+                clientAreaDimensions,
+                path:           screenshotPath,
+                cropDimensions: Capturer._getCropDimensions(cropDimensions, pageDimensions)
+            });
 
-                    path:           screenshotPath,
-                    cropDimensions: Capturer._getCropDimensions(cropDimensions, pageDimensions)
-                });
-
-                if (croppedImage)
-                    await writePng(screenshotPath, croppedImage);
-            }
-            catch (err) {
-                await deleteFile(screenshotPath);
-
-                throw err;
-            }
+            if (croppedImage)
+                await writePng(screenshotPath, croppedImage);
 
             await generateThumbnail(screenshotPath, thumbnailPath);
         });
 
+        const testRunId         = this.testEntry.testRuns[this.browserId].id;
+        const userAgent         = escapeUserAgent(this.pathPattern.data.parsedUserAgent.prettyUserAgent);
+        const quarantineAttempt = this.pathPattern.data.quarantineAttempt;
+        const takenOnFail       = forError;
+
         const screenshot = {
+            testRunId,
             screenshotPath,
             thumbnailPath,
-            userAgent:         escapeUserAgent(this.pathPattern.data.parsedUserAgent),
-            quarantineAttempt: this.pathPattern.data.quarantineAttempt,
-            takenOnFail:       forError,
+            userAgent,
+            quarantineAttempt,
+            takenOnFail
         };
 
         this.testEntry.screenshots.push(screenshot);

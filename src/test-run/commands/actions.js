@@ -3,22 +3,31 @@ import SelectorBuilder from '../../client-functions/selectors/selector-builder';
 import ClientFunctionBuilder from '../../client-functions/client-function-builder';
 import functionBuilderSymbol from '../../client-functions/builder-symbol';
 import CommandBase from './base';
-import { ActionOptions, ClickOptions, MouseOptions, TypeOptions, DragToElementOptions } from './options';
+import {
+    ActionOptions,
+    ClickOptions,
+    MouseOptions,
+    TypeOptions,
+    DragToElementOptions
+} from './options';
+
 import { initSelector, initUploadSelector } from './validations/initializers';
-import executeJsExpression from '../execute-js-expression';
+import { executeJsExpression } from '../execute-js-expression';
 import { isJSExpression } from './utils';
 
 import {
     actionOptions,
     integerArgument,
     positiveIntegerArgument,
+    stringArgument,
     nonEmptyStringArgument,
     nullableStringArgument,
     urlArgument,
     stringOrStringArrayArgument,
     setSpeedArgument,
     actionRoleArgument,
-    booleanArgument
+    booleanArgument,
+    functionArgument
 } from './validations/argument';
 
 import { SetNativeDialogHandlerCodeWrongTypeError } from '../../errors/test-run';
@@ -59,19 +68,22 @@ function initDialogHandler (name, val, { skipVisibilityCheck, testRun }) {
 
     const options      = val.options;
     const methodName   = 'setNativeDialogHandler';
-    let builder      = fn && fn[functionBuilderSymbol];
-    const isSelector   = builder instanceof SelectorBuilder;
     const functionType = typeof fn;
+
+    let builder = fn && fn[functionBuilderSymbol];
+
+    const isSelector       = builder instanceof SelectorBuilder;
+    const isClientFunction = builder instanceof ClientFunctionBuilder;
 
     if (functionType !== 'function' || isSelector)
         throw new SetNativeDialogHandlerCodeWrongTypeError(isSelector ? 'Selector' : functionType);
 
-    builder = builder instanceof ClientFunctionBuilder ?
-        fn.with(options)[functionBuilderSymbol] :
-        new ClientFunctionBuilder(fn, options, { instantiation: methodName, execution: methodName });
+    if (isClientFunction)
+        builder = fn.with(options)[functionBuilderSymbol];
+    else
+        builder = new ClientFunctionBuilder(fn, options, { instantiation: methodName, execution: methodName });
 
     return builder.getCommand([]);
-
 }
 
 // Commands
@@ -109,8 +121,19 @@ export class ExecuteExpressionCommand extends CommandBase {
     _getAssignableProperties () {
         return [
             { name: 'expression', type: nonEmptyStringArgument, required: true },
-            { name: 'resultVariableName', type: nonEmptyStringArgument, defaultValue: null },
-            { name: 'isAsyncExpression', type: booleanArgument, defaultValue: false }
+            { name: 'resultVariableName', type: nonEmptyStringArgument, defaultValue: null }
+        ];
+    }
+}
+
+export class ExecuteAsyncExpressionCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.executeAsyncExpression);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'expression', type: stringArgument, required: true }
         ];
     }
 }
@@ -251,7 +274,8 @@ export class NavigateToCommand extends CommandBase {
     _getAssignableProperties () {
         return [
             { name: 'url', type: urlArgument, required: true },
-            { name: 'stateSnapshot', type: nullableStringArgument, defaultValue: null }
+            { name: 'stateSnapshot', type: nullableStringArgument, defaultValue: null },
+            { name: 'forceReload', type: booleanArgument, defaultValue: false }
         ];
     }
 }
@@ -296,6 +320,100 @@ export class SwitchToIframeCommand extends CommandBase {
 export class SwitchToMainWindowCommand {
     constructor () {
         this.type = TYPE.switchToMainWindow;
+    }
+}
+
+export class OpenWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.openWindow);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'url', type: urlArgument },
+        ];
+    }
+}
+
+export class CloseWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.closeWindow);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'windowId', type: nullableStringArgument, required: true },
+        ];
+    }
+}
+
+
+export class GetCurrentWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.getCurrentWindow);
+    }
+
+    _getAssignableProperties () {
+        return [
+        ];
+    }
+}
+
+export class GetCurrentWindowsCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.getCurrentWindows);
+    }
+
+    _getAssignableProperties () {
+        return [
+        ];
+    }
+}
+
+
+export class SwitchToWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.switchToWindow);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'windowId', type: nonEmptyStringArgument, required: true }
+        ];
+    }
+}
+
+export class SwitchToWindowByPredicateCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.switchToWindowByPredicate);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'findWindow', type: functionArgument, required: true }
+        ];
+    }
+}
+
+
+export class SwitchToParentWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.switchToParentWindow);
+    }
+
+    _getAssignableProperties () {
+        return [
+        ];
+    }
+}
+
+export class SwitchToPreviousWindowCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.switchToPreviousWindow);
+    }
+
+    _getAssignableProperties () {
+        return [];
     }
 }
 
@@ -355,6 +473,19 @@ export class UseRoleCommand extends CommandBase {
     _getAssignableProperties () {
         return [
             { name: 'role', type: actionRoleArgument, required: true }
+        ];
+    }
+}
+
+export class RecorderCommand extends CommandBase {
+    constructor (obj, testRun) {
+        super(obj, testRun, TYPE.recorder);
+    }
+
+    _getAssignableProperties () {
+        return [
+            { name: 'subtype', type: nonEmptyStringArgument, required: true },
+            { name: 'forceExecutionInTopWindowOnly', type: booleanArgument, defaultValue: false }
         ];
     }
 }

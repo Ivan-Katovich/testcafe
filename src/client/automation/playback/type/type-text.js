@@ -6,6 +6,7 @@ const browserUtils   = hammerhead.utils.browser;
 const eventSandbox   = hammerhead.sandbox.event;
 const eventSimulator = hammerhead.eventSandbox.eventSimulator;
 const listeners      = hammerhead.eventSandbox.listeners;
+const nativeMethods  = hammerhead.nativeMethods;
 
 const domUtils        = testCafeCore.domUtils;
 const contentEditable = testCafeCore.contentEditable;
@@ -31,7 +32,8 @@ function _getSelectionInElement (element) {
 
 function _updateSelectionAfterDeletionContent (element, selection) {
     const startNode      = selection.startPos.node;
-    const hasStartParent = startNode.parentNode && startNode.parentElement;
+    const startParent    = nativeMethods.nodeParentNodeGetter.call(startNode);
+    const hasStartParent = startParent && startNode.parentElement;
 
     const browserRequiresSelectionUpdating = browserUtils.isChrome && browserUtils.version < 58 || browserUtils.isSafari;
 
@@ -55,11 +57,15 @@ function _typeTextInElementNode (elementNode, text, offset) {
     const nodeForTyping  = document.createTextNode(text);
     const textLength     = text.length;
     const selectPosition = { node: nodeForTyping, offset: textLength };
+    const parent         = nativeMethods.nodeParentNodeGetter.call(elementNode);
 
     if (domUtils.getTagName(elementNode) === 'br')
-        elementNode.parentNode.insertBefore(nodeForTyping, elementNode);
-    else if (offset > 0)
-        elementNode.insertBefore(nodeForTyping, elementNode.childNodes[offset]);
+        parent.insertBefore(nodeForTyping, elementNode);
+    else if (offset > 0) {
+        const childNodes = nativeMethods.nodeChildNodesGetter.call(elementNode);
+
+        elementNode.insertBefore(nodeForTyping, childNodes[offset]);
+    }
     else
         elementNode.appendChild(nodeForTyping);
 
@@ -104,6 +110,18 @@ function _excludeInvisibleSymbolsFromSelection (selection) {
     }
 
     return selection;
+}
+
+// NOTE: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/beforeinput_event
+// The `beforeInput` event is supported only in Chrome-based browsers and Safari
+// The order of events differs in Chrome and Safari:
+// In Chrome: `beforeinput` occurs before `textInput`
+// In Safari: `beforeinput` occurs after `textInput`
+function simulateBeforeInput (element, text, needSimulate) {
+    if (needSimulate)
+        return eventSimulator.beforeInput(element, text);
+
+    return true;
 }
 
 // NOTE: Typing can be prevented in Chrome/Edge but can not be prevented in IE11 or Firefox
@@ -202,7 +220,13 @@ function _typeTextToContentEditable (element, text) {
     if (!startNode || !domUtils.isContentEditableElement(startNode) || !domUtils.isRenderedNode(startNode))
         return;
 
+    if (!simulateBeforeInput(element, text, browserUtils.isChrome))
+        return;
+
     beforeContentChanged();
+
+    if (needProcessInput)
+        needProcessInput = simulateBeforeInput(element, text, browserUtils.isSafari);
 
     if (needProcessInput) {
         // NOTE: we can type only to the text nodes; for nodes with the 'element-node' type, we use a special behavior
@@ -218,10 +242,17 @@ function _typeTextToContentEditable (element, text) {
 function _typeTextToTextEditable (element, text) {
     const elementValue      = domUtils.getElementValue(element);
     const textLength        = text.length;
-    let startSelection    = textSelection.getSelectionStart(element);
-    let endSelection      = textSelection.getSelectionEnd(element);
+    let startSelection      = textSelection.getSelectionStart(element);
+    let endSelection        = textSelection.getSelectionEnd(element);
     const isInputTypeNumber = domUtils.isInputElement(element) && element.type === 'number';
-    const needProcessInput  = simulateTextInput(element, text);
+
+    if (!simulateBeforeInput(element, text, browserUtils.isChrome))
+        return;
+
+    let needProcessInput = simulateTextInput(element, text);
+
+    if (needProcessInput)
+        needProcessInput = simulateBeforeInput(element, text, browserUtils.isSafari);
 
     if (!needProcessInput)
         return;

@@ -2,6 +2,7 @@ trigger:
   branches:
     exclude:
     - build-bot-temp-*
+    - (testbot-only)*
     - new-docs
 
   paths:
@@ -14,6 +15,9 @@ trigger:
     - /package.json
 
 pool: 'BrowserStack agents'
+
+variables:
+  RETRY_FAILED_TESTS: "true"
 
 steps:
 - bash: |
@@ -29,9 +33,13 @@ steps:
   inputs:
     versionSpec: '10.x'
 
+- task: DeleteFiles@1
+  inputs:
+    Contents: node_modules
+
 - bash: |
     npm install --no-progress --loglevel error
     npm test
   displayName: 'Run tests'
   condition: and(succeeded(), not(variables['isDocCommit']))
-  timeoutInMinutes: 40
+  timeoutInMinutes: 60

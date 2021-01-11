@@ -1,8 +1,8 @@
-const expect            = require('chai').expect;
+const { expect }        = require('chai');
 const path              = require('path');
 const fs                = require('fs');
 const tmp               = require('tmp');
-const find              = require('lodash').find;
+const { find }          = require('lodash');
 const CliArgumentParser = require('../../lib/cli/argument-parser');
 const nanoid            = require('nanoid');
 
@@ -32,18 +32,52 @@ describe('CLI argument parser', function () {
             });
     }
 
+    describe('Set browser provider name', function () {
+        it('Should set the default provider name to "locally-installed" from "--list-browsers"', function () {
+            return parse('--list-browsers')
+                .then(function (parser) {
+                    expect(parser.opts.listBrowsers).eql(true);
+                    expect(parser.opts.providerName).eql('locally-installed');
+                });
+        });
+
+        it('Should parse the browser provider name from "--list-browsers saucelabs"', function () {
+            return parse('--list-browsers saucelabs')
+                .then(function (parser) {
+                    expect(parser.opts.listBrowsers).eql(true);
+                    expect(parser.opts.providerName).eql('saucelabs');
+                });
+        });
+
+        it('Should set the default provider name to "locally-installed" from "-b"', function () {
+            return parse('-b')
+                .then(function (parser) {
+                    expect(parser.opts.listBrowsers).eql(true);
+                    expect(parser.opts.providerName).eql('locally-installed');
+                });
+        });
+
+        it('Should parse "-b saucelabs" browser provider name from "-b saucelabs"', function () {
+            return parse('-b saucelabs')
+                .then(function (parser) {
+                    expect(parser.opts.listBrowsers).eql(true);
+                    expect(parser.opts.providerName).eql('saucelabs');
+                });
+        });
+    });
+
     describe('Browser list', function () {
         it('Should be parsed as array of aliases or paths', function () {
             return parse('path:"/Applications/Firefox.app",ie,chrome,firefox,')
                 .then(function (parser) {
-                    expect(parser.browsers).eql(['path:/Applications/Firefox.app', 'ie', 'chrome', 'firefox']);
+                    expect(parser.opts.browsers).eql(['path:/Applications/Firefox.app', 'ie', 'chrome', 'firefox']);
                 });
         });
 
         it('Should accept "remote" alias', function () {
             return parse('remote:12,ie,remote,chrome,remote:3')
                 .then(function (parser) {
-                    expect(parser.browsers).eql(['ie', 'chrome']);
+                    expect(parser.opts.browsers).eql(['ie', 'chrome']);
                     expect(parser.remoteCount).eql(16);
                 });
         });
@@ -51,14 +85,14 @@ describe('CLI argument parser', function () {
         it('Should accept "all" alias', function () {
             return parse('ie,chrome,all')
                 .then(function (parser) {
-                    expect(parser.browsers).eql(['ie', 'chrome', 'all']);
+                    expect(parser.opts.browsers).eql(['ie', 'chrome', 'all']);
                 });
         });
 
         it('Should split browsers correctly if paths have commas and quotes', function () {
             return parse('path:"/Apps,Libs/\'Firefox.app",ie,chrome,firefox,path:\'/Apps,Libs/"Chrome.app\'')
                 .then(function (parser) {
-                    expect(parser.browsers).eql([
+                    expect(parser.opts.browsers).eql([
                         'path:/Apps,Libs/\'Firefox.app', 'ie', 'chrome', 'firefox',
                         'path:/Apps,Libs/"Chrome.app'
                     ]);
@@ -68,7 +102,7 @@ describe('CLI argument parser', function () {
         it('Should split browsers correctly if providers have arguments', function () {
             return parse(['path:"/Apps/Firefox.app --arg1",chrome --arg2'])
                 .then(function (parser) {
-                    expect(parser.browsers).eql([
+                    expect(parser.opts.browsers).eql([
                         'path:/Apps/Firefox.app --arg1',
                         'chrome --arg2'
                     ]);
@@ -132,6 +166,32 @@ describe('CLI argument parser', function () {
         });
     });
 
+    describe('Request timeout', () => {
+        describe('Page request timeout', () => {
+            it('Should parse the option as integer value', async () => {
+                const parser = await parse('--page-request-timeout 1000');
+
+                expect(parser.opts.pageRequestTimeout).eql(1000);
+            });
+
+            it('Should raise an error on invalid option value', () => {
+                return assertRaisesError('--page-request-timeout str', 'Page request timeout is expected to be a non-negative number, but it was "str".');
+            });
+        });
+
+        describe('Ajax request timeout', () => {
+            it('Should parse the option as integer value', async () => {
+                const parser = await parse('--ajax-request-timeout 1000');
+
+                expect(parser.opts.ajaxRequestTimeout).eql(1000);
+            });
+
+            it('Should raise an error on invalid option value', () => {
+                return assertRaisesError('--ajax-request-timeout str', 'Ajax request timeout is expected to be a non-negative number, but it was "str".');
+            });
+        });
+    });
+
     describe('Speed', function () {
         it('Should parse "--speed" option as a number', function () {
             return parse('--speed 0.01')
@@ -174,21 +234,21 @@ describe('CLI argument parser', function () {
         it('Should filter by test name with "-t, --test" option', function () {
             return parse('-t test.js')
                 .then(function (parser) {
-                    expect(parser.filter('test.js')).to.be.true;
-                    expect(parser.filter('1test.js')).to.be.false;
-                    expect(parser.filter('test-js')).to.be.false;
+                    expect(parser.opts.filter('test.js')).to.be.true;
+                    expect(parser.opts.filter('1test.js')).to.be.false;
+                    expect(parser.opts.filter('test-js')).to.be.false;
                 });
         });
 
         it('Should filter by test name with "-T, --test-grep" option', function () {
             parse('-T ^test\\d+$')
                 .then(function (parser) {
-                    expect(parser.filter.testGrep.test('test1')).to.be.true;
-                    expect(parser.filter.testGrep.test('test')).to.be.false;
+                    expect(parser.opts.filter.testGrep.test('test1')).to.be.true;
+                    expect(parser.opts.filter.testGrep.test('test')).to.be.false;
 
-                    expect(parser.filter('test1')).to.be.true;
-                    expect(parser.filter('test2')).to.be.true;
-                    expect(parser.filter('test')).to.be.false;
+                    expect(parser.opts.filter('test1')).to.be.true;
+                    expect(parser.opts.filter('test2')).to.be.true;
+                    expect(parser.opts.filter('test')).to.be.false;
                 });
         });
 
@@ -199,21 +259,21 @@ describe('CLI argument parser', function () {
         it('Should filter by fixture name with "-f, --fixture" option', function () {
             return parse('-f fixture.js')
                 .then(function (parser) {
-                    expect(parser.filter('test', 'fixture.js')).to.be.true;
-                    expect(parser.filter('test', '1fixture.js')).to.be.false;
-                    expect(parser.filter('test', 'fixture-js')).to.be.false;
+                    expect(parser.opts.filter('test', 'fixture.js')).to.be.true;
+                    expect(parser.opts.filter('test', '1fixture.js')).to.be.false;
+                    expect(parser.opts.filter('test', 'fixture-js')).to.be.false;
                 });
         });
 
         it('Should filter by fixture name with "-F, --fixture-grep" option', function () {
             return parse('-F ^fixture\\d+$')
                 .then(function (parser) {
-                    expect(parser.filter.fixtureGrep.test('fixture1')).to.be.true;
-                    expect(parser.filter.fixtureGrep.test('fixture')).to.be.false;
+                    expect(parser.opts.filter.fixtureGrep.test('fixture1')).to.be.true;
+                    expect(parser.opts.filter.fixtureGrep.test('fixture')).to.be.false;
 
-                    expect(parser.filter('test', 'fixture1')).to.be.true;
-                    expect(parser.filter('test', 'fixture2')).to.be.true;
-                    expect(parser.filter('test', 'fixture')).to.be.false;
+                    expect(parser.opts.filter('test', 'fixture1')).to.be.true;
+                    expect(parser.opts.filter('test', 'fixture2')).to.be.true;
+                    expect(parser.opts.filter('test', 'fixture')).to.be.false;
                 });
         });
 
@@ -224,25 +284,25 @@ describe('CLI argument parser', function () {
         it('Should filter by test meta with "--test-meta" option', function () {
             return parse('--test-meta meta=test')
                 .then(function (parser) {
-                    expect(parser.filter.testMeta).to.be.deep.equal({ meta: 'test' });
+                    expect(parser.opts.filter.testMeta).to.be.deep.equal({ meta: 'test' });
 
-                    expect(parser.filter(null, null, null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter(null, null, null, { another: 'meta', meta: 'test' })).to.be.true;
-                    expect(parser.filter(null, null, null, {})).to.be.false;
-                    expect(parser.filter(null, null, null, { meta: 'notest' })).to.be.false;
+                    expect(parser.opts.filter(null, null, null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter(null, null, null, { another: 'meta', meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter(null, null, null, {})).to.be.false;
+                    expect(parser.opts.filter(null, null, null, { meta: 'notest' })).to.be.false;
                 });
         });
 
         it('Should filter by fixture meta with "--fixture-meta" option', function () {
             return parse('--fixture-meta meta=test,more=meta')
                 .then(function (parser) {
-                    expect(parser.filter.fixtureMeta).to.be.deep.equal({ meta: 'test', more: 'meta' });
+                    expect(parser.opts.fixtureMeta).to.be.deep.equal({ meta: 'test', more: 'meta' });
 
-                    expect(parser.filter(null, null, null, null, { meta: 'test', more: 'meta' })).to.be.true;
-                    expect(parser.filter(null, null, null, null, { another: 'meta', meta: 'test', more: 'meta' })).to.be.true;
-                    expect(parser.filter(null, null, null, null, {})).to.be.false;
-                    expect(parser.filter(null, null, null, null, { meta: 'test' })).to.be.false;
-                    expect(parser.filter(null, null, null, null, { meta: 'test', more: 'another' })).to.be.false;
+                    expect(parser.opts.filter(null, null, null, null, { meta: 'test', more: 'meta' })).to.be.true;
+                    expect(parser.opts.filter(null, null, null, null, { another: 'meta', meta: 'test', more: 'meta' })).to.be.true;
+                    expect(parser.opts.filter(null, null, null, null, {})).to.be.false;
+                    expect(parser.opts.filter(null, null, null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter(null, null, null, null, { meta: 'test', more: 'another' })).to.be.false;
                 });
         });
 
@@ -291,105 +351,105 @@ describe('CLI argument parser', function () {
         it('Should combine filters provided by multiple options', function () {
             return parse('-t thetest1 -T test\\d+$')
                 .then(function (parser) {
-                    expect(parser.filter('thetest1')).to.be.true;
-                    expect(parser.filter('thetest2')).to.be.false;
+                    expect(parser.opts.filter('thetest1')).to.be.true;
+                    expect(parser.opts.filter('thetest2')).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 -T test$ ');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1')).to.be.false;
-                    expect(parser.filter('thetest')).to.be.false;
+                    expect(parser.opts.filter('thetest1')).to.be.false;
+                    expect(parser.opts.filter('thetest')).to.be.false;
                 })
                 .then(function () {
                     return parse('-f thefixture1 -F fixture\\d+$');
                 })
                 .then(function (parser) {
-                    expect(parser.filter(null, 'thefixture1')).to.be.true;
-                    expect(parser.filter(null, 'thefixture2')).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture1')).to.be.true;
+                    expect(parser.opts.filter(null, 'thefixture2')).to.be.false;
                 })
                 .then(function () {
                     return parse('-f thefixture1 -F fixture$');
                 })
                 .then(function (parser) {
-                    expect(parser.filter(null, 'thefixture1')).to.be.false;
-                    expect(parser.filter(null, 'thefixture')).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture1')).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture')).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 -f thefixture1');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', 'thefixture1')).to.be.true;
-                    expect(parser.filter('thetest', 'thefixture1')).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture')).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1')).to.be.true;
+                    expect(parser.opts.filter('thetest', 'thefixture1')).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture')).to.be.false;
                 })
                 .then(function () {
                     return parse('-T test\\d+$ -f thefixture1 -F fixture\\d+$');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', 'thefixture1')).to.be.true;
-                    expect(parser.filter('thetest', 'thefixture1')).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture')).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1')).to.be.true;
+                    expect(parser.opts.filter('thetest', 'thefixture1')).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture')).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 --test-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', null, null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter('thetest1', null, null, {})).to.be.false;
-                    expect(parser.filter('thetest2', null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', null, null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter('thetest1', null, null, {})).to.be.false;
+                    expect(parser.opts.filter('thetest2', null, null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-f thefixture1 --test-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter(null, 'thefixture1', null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter(null, 'thefixture1', null, {})).to.be.false;
-                    expect(parser.filter(null, 'thefixture2', null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture1', null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter(null, 'thefixture1', null, {})).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture2', null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 -f thefixture1 --test-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', 'thefixture1', null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter('thetest1', 'thefixture1', null, {})).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture2', null, { meta: 'test' })).to.be.false;
-                    expect(parser.filter('thetest2', 'thefixture1', null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, {})).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture2', null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest2', 'thefixture1', null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 --fixture-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', null, null, null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter('thetest1', null, null, null, {})).to.be.false;
-                    expect(parser.filter('thetest2', null, null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', null, null, null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter('thetest1', null, null, null, {})).to.be.false;
+                    expect(parser.opts.filter('thetest2', null, null, null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-f thefixture1 --fixture-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter(null, 'thefixture1', null, null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter(null, 'thefixture1', null, null, {})).to.be.false;
-                    expect(parser.filter(null, 'thefixture2', null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture1', null, null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter(null, 'thefixture1', null, null, {})).to.be.false;
+                    expect(parser.opts.filter(null, 'thefixture2', null, null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 -f thefixture1 --fixture-meta meta=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', 'thefixture1', null, null, { meta: 'test' })).to.be.true;
-                    expect(parser.filter('thetest1', 'thefixture1', null, null, {})).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture2', null, null, { meta: 'test' })).to.be.false;
-                    expect(parser.filter('thetest2', 'thefixture1', null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, null, { meta: 'test' })).to.be.true;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, null, {})).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture2', null, null, { meta: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest2', 'thefixture1', null, null, { meta: 'test' })).to.be.false;
                 })
                 .then(function () {
                     return parse('-t thetest1 -f thefixture1 --test-meta test=test --fixture-meta fixture=test');
                 })
                 .then(function (parser) {
-                    expect(parser.filter('thetest1', 'thefixture1', null, { test: 'test' }, { fixture: 'test' })).to.be.true;
-                    expect(parser.filter('thetest1', 'thefixture1', null, {}, { fixture: 'test' })).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture1', null, { test: 'test' }, {})).to.be.false;
-                    expect(parser.filter('thetest1', 'thefixture2', null, { test: 'test' }, { fixture: 'test' })).to.be.false;
-                    expect(parser.filter('thetest2', 'thefixture1', null, { test: 'test' }, { fixture: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, { test: 'test' }, { fixture: 'test' })).to.be.true;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, {}, { fixture: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture1', null, { test: 'test' }, {})).to.be.false;
+                    expect(parser.opts.filter('thetest1', 'thefixture2', null, { test: 'test' }, { fixture: 'test' })).to.be.false;
+                    expect(parser.opts.filter('thetest2', 'thefixture1', null, { test: 'test' }, { fixture: 'test' })).to.be.false;
                 });
         });
 
@@ -495,6 +555,67 @@ describe('CLI argument parser', function () {
         });
     });
 
+    describe('Screenshot options', () => {
+        it('Should parse screenshot options', async () => {
+            const parser = await parse('--screenshots path=/a/b/c,fullPage=true,takeOnFails=true,pathPattern=${TEST}.png');
+
+            expect(parser.opts.screenshots.takeOnFails).to.be.ok;
+            expect(parser.opts.screenshots.path).equal('/a/b/c');
+            expect(parser.opts.screenshots.fullPage).to.be.ok;
+            expect(parser.opts.screenshots.pathPattern).equal('${TEST}.png');
+        });
+
+        it('Should understand legacy keys', async () => {
+            const parser = await parse('--screenshots-on-fails --screenshots /a/b/c --screenshot-path-pattern ${TEST}.png');
+
+            expect(parser.opts.screenshots.takeOnFails).to.be.ok;
+            expect(parser.opts.screenshots.path).equal('/a/b/c');
+            expect(parser.opts.screenshots.fullPage).to.be.undefined;
+            expect(parser.opts.screenshots.pathPattern).equal('${TEST}.png');
+        });
+
+        it('Should prioritize over legacy keys', async () => {
+            const parser = await parse('--screenshots path=/a/b/c,takeOnFails=false,pathPattern=${TEST}.png --screenshots-on-fails --screenshot-path-pattern not${TEST}.png');
+
+            expect(parser.opts.screenshots.takeOnFails).to.be.false;
+            expect(parser.opts.screenshots.path).equal('/a/b/c');
+            expect(parser.opts.screenshots.fullPage).to.be.undefined;
+            expect(parser.opts.screenshots.pathPattern).equal('${TEST}.png');
+        });
+    });
+
+    describe('Compiler options', () => {
+        it('Basic', async () => {
+            const cmd = '--compiler-options ' +
+                'typescript.options.skipLibCheck=true;' +
+                "typescript.options.lib=ES5,'WebWorker';" +
+                'typescript.configPath=/path-to-tsconfig.json';
+
+            const parser = await parse(cmd);
+
+            const typescriptCompilerOptions = parser.opts.compilerOptions.typescript;
+
+            expect(typescriptCompilerOptions.options.skipLibCheck).eql(true);
+            expect(typescriptCompilerOptions.options.lib).eql(['ES5', 'WebWorker']);
+            expect(typescriptCompilerOptions.configPath).eql('/path-to-tsconfig.json');
+        });
+
+        it('Array option with a single element', async () => {
+            const parser = await parse('--compiler-options typescript.options.lib=ES5');
+
+            expect(parser.opts.compilerOptions.typescript.options.lib).eql(['ES5']);
+        });
+    });
+
+    it('Client scripts', () => {
+        return parse('--client-scripts asserts/jquery.js,mockDate.js')
+            .then(parser => {
+                expect(parser.opts.clientScripts).eql([
+                    'asserts/jquery.js',
+                    'mockDate.js'
+                ]);
+            });
+    });
 
     it('Should parse reporters and their output file paths and ensure they exist', function () {
         const cwd      = process.cwd();
@@ -510,18 +631,19 @@ describe('CLI argument parser', function () {
     });
 
     it('Should parse command line arguments', function () {
-        return parse('-r list -S -q -e --hostname myhost --proxy localhost:1234 --proxy-bypass localhost:5678 --qr-code --app run-app --speed 0.5 --debug-on-fail --disable-page-reloads --dev --sf ie test/server/data/file-list/file-1.js')
+        return parse('-r list -S -q -e --hostname myhost --proxy localhost:1234 --proxy-bypass localhost:5678 --qr-code --app run-app --speed 0.5 --debug-on-fail --disable-page-reloads --retry-test-pages --dev --sf --disable-page-caching ie test/server/data/file-list/file-1.js')
             .then(parser => {
-                expect(parser.browsers).eql(['ie']);
-                expect(parser.src).eql(['test/server/data/file-list/file-1.js']);
+                expect(parser.opts.browsers).eql(['ie']);
+                expect(parser.opts.src).eql(['test/server/data/file-list/file-1.js']);
                 expect(parser.opts.reporter[0].name).eql('list');
                 expect(parser.opts.hostname).eql('myhost');
                 expect(parser.opts.app).eql('run-app');
-                expect(parser.opts.screenshots).to.be.undefined;
-                expect(parser.opts.screenshotsOnFails).to.be.ok;
+                expect(parser.opts.screenshots.takeOnFails).to.be.ok;
+                expect(parser.opts.screenshots.path).to.be.undefined;
+                expect(parser.opts.screenshots.fullPage).to.be.undefined;
+                expect(parser.opts.screenshots.pathPattern).to.be.undefined;
                 expect(parser.opts.quarantineMode).to.be.ok;
                 expect(parser.opts.skipJsErrors).to.be.ok;
-                expect(parser.opts.disablePageReloads).to.be.ok;
                 expect(parser.opts.dev).to.be.ok;
                 expect(parser.opts.speed).eql(0.5);
                 expect(parser.opts.qrCode).to.be.ok;
@@ -529,10 +651,13 @@ describe('CLI argument parser', function () {
                 expect(parser.opts.proxyBypass).to.be.ok;
                 expect(parser.opts.debugOnFail).to.be.ok;
                 expect(parser.opts.stopOnFirstFail).to.be.ok;
+                expect(parser.opts.disablePageCaching).to.be.ok;
+                expect(parser.opts.disablePageReloads).to.be.ok;
+                expect(parser.opts.retryTestPages).to.be.ok;
             });
     });
 
-    it('Should has static CLI', () => {
+    it('Should have static CLI', () => {
         const WARNING          = 'IMPORTANT: Please be sure what you want to change CLI if this test is failing!';
         const EXPECTED_OPTIONS = [
             { long: '--version', short: '-v' },
@@ -563,7 +688,6 @@ describe('CLI argument parser', function () {
             { long: '--hostname' },
             { long: '--proxy' },
             { long: '--proxy-bypass' },
-            { long: '--disable-page-reloads' },
             { long: '--dev' },
             { long: '--ssl' },
             { long: '--qr-code' },
@@ -573,11 +697,23 @@ describe('CLI argument parser', function () {
             { long: '--stop-on-first-fail', short: '--sf' },
             { long: '--video' },
             { long: '--video-options' },
-            { long: '--video-encoding-options' }
+            { long: '--video-encoding-options' },
+            { long: '--ts-config-path' },
+            { long: '--client-scripts', short: '--cs' },
+            { long: '--disable-page-caching' },
+            { long: '--disable-page-reloads' },
+            { long: '--retry-test-pages' },
+            { long: '--disable-screenshots' },
+            { long: '--screenshots-full-page' },
+            { long: '--disable-multiple-windows' },
+            { long: '--experimental-compiler-service' },
+            { long: '--compiler-options' },
+            { long: '--page-request-timeout' },
+            { long: '--ajax-request-timeout' }
         ];
 
         const parser  = new CliArgumentParser('');
-        const options = parser.program.options;
+        const options = [ ...parser.program.options, ...parser.experimental.options];
 
         expect(options.length).eql(EXPECTED_OPTIONS.length, WARNING);
 
@@ -588,5 +724,46 @@ describe('CLI argument parser', function () {
             expect(option.long).eql(EXPECTED_OPTIONS[i].long, WARNING);
             expect(option.short).eql(EXPECTED_OPTIONS[i].short, WARNING);
         }
+    });
+
+    it('Run options', () => {
+        const argumentsString = 'ie,chrome test.js' + [
+            '--debug-on-fail',
+            '--skip-js-errors',
+            '--skip-uncaught-errors',
+            '--quarantine-mode',
+            '--debug-mode',
+            '--debug-on-fail',
+            '--selector-timeout 1000',
+            '--assertion-timeout 1000',
+            '--page-load-timeout 1000',
+            '--speed 1',
+            '--stop-on-first-fail',
+            '--disable-page-caching',
+            '--disable-page-reloads',
+            '--disable-screenshots',
+            '--disable-multiple-windows'
+        ].join(' ');
+
+        return parse(argumentsString)
+            .then(parser => {
+                const runOpts = parser.getRunOptions();
+
+                expect(runOpts.skipJsErrors).eql(true);
+                expect(runOpts.skipUncaughtErrors).eql(true);
+                expect(runOpts.quarantineMode).eql(true);
+                expect(runOpts.debugMode).eql(true);
+                expect(runOpts.debugOnFail).eql(true);
+                expect(runOpts.selectorTimeout).eql(1000);
+                expect(runOpts.assertionTimeout).eql(1000);
+                expect(runOpts.pageLoadTimeout).eql(1000);
+                expect(runOpts.speed).eql(1);
+                expect(runOpts.stopOnFirstFail).eql(true);
+                expect(runOpts.disablePageCaching).eql(true);
+                expect(runOpts.disablePageReloads).eql(true);
+                expect(runOpts.disableScreenshots).eql(true);
+                expect(runOpts.disableMultipleWindows).eql(true);
+                expect(runOpts.browsers).to.be.undefined;
+            });
     });
 });

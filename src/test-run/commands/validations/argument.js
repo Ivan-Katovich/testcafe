@@ -1,4 +1,4 @@
-import { isValidDeviceName } from 'testcafe-browser-tools';
+import { isValidDeviceName } from 'device-specs';
 import roleMarkerSymbol from '../../../role/marker-symbol';
 
 import {
@@ -19,11 +19,12 @@ import {
     ActionStringOrStringArrayArgumentError,
     ActionStringArrayElementError,
     ActionUnsupportedDeviceTypeError,
+    ActionFunctionArgumentError,
     SetTestSpeedArgumentError,
     ForbiddenCharactersInScreenshotPathError
 } from '../../../errors/test-run';
 
-import { assertUrl } from '../../../api/test-page-url';
+import { assertPageUrl } from '../../../api/test-page-url';
 import checkFilePath from '../../../utils/check-file-path';
 
 
@@ -47,7 +48,7 @@ export function actionOptions (name, val) {
 }
 
 
-export function nonEmptyStringArgument (argument, val, createError) {
+export function stringArgument (argument, val, createError) {
     if (!createError)
         createError = actualValue => new ActionStringArgumentError(argument, actualValue);
 
@@ -55,6 +56,13 @@ export function nonEmptyStringArgument (argument, val, createError) {
 
     if (type !== 'string')
         throw createError(type);
+}
+
+export function nonEmptyStringArgument (argument, val, createError) {
+    if (!createError)
+        createError = actualValue => new ActionStringArgumentError(argument, actualValue);
+
+    stringArgument(argument, val, createError);
 
     if (!val.length)
         throw createError('""');
@@ -70,7 +78,7 @@ export function nullableStringArgument (argument, val) {
 export function urlArgument (name, val) {
     nonEmptyStringArgument(name, val);
 
-    assertUrl(val.trim(), 'navigateTo');
+    assertPageUrl(val.trim(), 'navigateTo');
 }
 
 export function stringOrStringArrayArgument (argument, val) {
@@ -113,4 +121,9 @@ export function screenshotPathArgument (name, val) {
 
     if (forbiddenCharsList.length)
         throw new ForbiddenCharactersInScreenshotPathError(val, forbiddenCharsList);
+}
+
+export function functionArgument (name, val) {
+    if (typeof val !== 'function')
+        throw new ActionFunctionArgumentError(name, val);
 }

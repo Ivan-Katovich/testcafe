@@ -4,6 +4,7 @@ import 'testcafe';
 fixture
     .skip
     .only
+    .disablePageCaching
     ('Fixture1')
     .page('http://example.com')
     .httpAuth({
@@ -23,6 +24,10 @@ fixture
     })
     .afterEach(async t => {
         await t.click('#smth');
+    })
+    .clientScripts({
+        content: 'abracadabra',
+        page:    'some/page'
     });
 
 test
@@ -37,14 +42,27 @@ test
         t.ctx['someKey'] = [];
         t.fixtureCtx['yo'] = 'hey';
 
+        const browserInfo = t.browser;
+
         await t.click('#smth');
     })
     .skip
     .only
+    .disablePageCaching
     .page('http://example.com')
     .httpAuth({
         username: 'user',
         password: 'pass',
         domain: 'domain',
         workstation: 'workstation'
-    });
+    })
+    .clientScripts([
+        {
+            module: 'some-module',
+            page:   'some/page'
+        },
+        {
+            path: '/some/path',
+            page: 'some/page'
+        }
+    ]);

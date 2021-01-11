@@ -1,44 +1,63 @@
-import { resolve as resolvePath } from 'path';
+import { resolve as resolvePath, dirname } from 'path';
 import debug from 'debug';
-import Promise from 'pinkie';
 import promisifyEvent from 'promisify-event';
 import mapReverse from 'map-reverse';
 import { EventEmitter } from 'events';
-import { flattenDeep as flatten, pull as remove } from 'lodash';
+import {
+    flattenDeep as flatten,
+    pull as remove,
+    isFunction
+} from 'lodash';
+
 import Bootstrapper from './bootstrapper';
 import Reporter from '../reporter';
 import Task from './task';
+import defaultDebugLogger from '../notifications/debug-logger';
 import { GeneralError } from '../errors/runtime';
 import { RUNTIME_ERRORS } from '../errors/types';
 import { assertType, is } from '../errors/runtime/type-assertions';
 import { renderForbiddenCharsList } from '../errors/test-run/utils';
 import detectFFMPEG from '../utils/detect-ffmpeg';
 import checkFilePath from '../utils/check-file-path';
-import { addRunningTest, removeRunningTest, startHandlingTestErrors, stopHandlingTestErrors } from '../utils/handle-errors';
+import {
+    addRunningTest,
+    removeRunningTest,
+    startHandlingTestErrors,
+    stopHandlingTestErrors
+} from '../utils/handle-errors';
+
 import OPTION_NAMES from '../configuration/option-names';
 import FlagList from '../utils/flag-list';
 import prepareReporters from '../utils/prepare-reporters';
+import loadClientScripts from '../custom-client-scripts/load';
+import { setUniqueUrls } from '../custom-client-scripts/utils';
+import ReporterStreamController from './reporter-stream-controller';
+import CustomizableCompilers from '../configuration/customizable-compilers';
+import { getConcatenatedValuesString, getPluralSuffix } from '../utils/string';
+import isLocalhost from '../utils/is-localhost';
 
 const DEBUG_LOGGER = debug('testcafe:runner');
 
 export default class Runner extends EventEmitter {
-    constructor (proxy, browserConnectionGateway, configuration) {
+    constructor (proxy, browserConnectionGateway, configuration, compilerService) {
         super();
 
         this.proxy               = proxy;
-        this.bootstrapper        = this._createBootstrapper(browserConnectionGateway);
+        this.bootstrapper        = this._createBootstrapper(browserConnectionGateway, compilerService);
         this.pendingTaskPromises = [];
         this.configuration       = configuration;
         this.isCli               = false;
 
-        this.apiMethodWasCalled = new FlagList({
-            initialFlagValue: false,
-            flags:            [OPTION_NAMES.src, OPTION_NAMES.browsers, OPTION_NAMES.reporter]
-        });
+        this.apiMethodWasCalled = new FlagList([
+            OPTION_NAMES.src,
+            OPTION_NAMES.browsers,
+            OPTION_NAMES.reporter,
+            OPTION_NAMES.clientScripts
+        ]);
     }
 
-    _createBootstrapper (browserConnectionGateway) {
-        return new Bootstrapper(browserConnectionGateway);
+    _createBootstrapper (browserConnectionGateway, compilerService) {
+        return new Bootstrapper(browserConnectionGateway, compilerService);
     }
 
     _disposeBrowserSet (browserSet) {
@@ -55,6 +74,7 @@ export default class Runner extends EventEmitter {
 
     async _disposeTaskAndRelatedAssets (task, browserSet, reporters, testedApp) {
         task.abort();
+        task.unRegisterClientScriptRouting();
         task.clearListeners();
 
         await this._disposeAssets(browserSet, reporters, testedApp);
@@ -90,6 +110,7 @@ export default class Runner extends EventEmitter {
             .then(removeFromPending);
 
         this.pendingTaskPromises.push(promise);
+
         return promise;
     }
 
@@ -104,17 +125,26 @@ export default class Runner extends EventEmitter {
     }
 
     async _getTaskResult (task, browserSet, reporters, testedApp) {
-        task.on('browser-job-done', job => browserSet.releaseConnection(job.browserConnection));
+        if (!task.opts.live) {
+            task.on('browser-job-done', job => {
+                job.browserConnections.forEach(bc => browserSet.releaseConnection(bc));
+            });
+        }
 
         const browserSetErrorPromise = promisifyEvent(browserSet, 'error');
+        const taskErrorPromise       = promisifyEvent(task, 'error');
+        const streamController       = new ReporterStreamController(task, reporters);
 
         const taskDonePromise = task.once('done')
-            .then(() => browserSetErrorPromise.cancel());
-
+            .then(() => browserSetErrorPromise.cancel())
+            .then(() => {
+                return Promise.all(reporters.map(reporter => reporter.pendingTaskDonePromise));
+            });
 
         const promises = [
             taskDonePromise,
-            browserSetErrorPromise
+            browserSetErrorPromise,
+            taskErrorPromise
         ];
 
         if (testedApp)
@@ -131,6 +161,9 @@ export default class Runner extends EventEmitter {
 
         await this._disposeAssets(browserSet, reporters, testedApp);
 
+        if (streamController.multipleStreamError)
+            throw streamController.multipleStreamError;
+
         return this._getFailedTestCount(task, reporters[0]);
     }
 
@@ -139,27 +172,31 @@ export default class Runner extends EventEmitter {
     }
 
     _runTask (reporterPlugins, browserSet, tests, testedApp) {
-        let completed           = false;
         const task              = this._createTask(tests, browserSet.browserConnectionGroups, this.proxy, this.configuration.getOptions());
-        const reporters         = reporterPlugins.map(reporter => new Reporter(reporter.plugin, task, reporter.outStream));
+        const reporters         = reporterPlugins.map(reporter => new Reporter(reporter.plugin, task, reporter.outStream, reporter.name));
         const completionPromise = this._getTaskResult(task, browserSet, reporters, testedApp);
+        let completed           = false;
 
         task.on('start', startHandlingTestErrors);
 
         if (!this.configuration.getOption(OPTION_NAMES.skipUncaughtErrors)) {
-            task.once('test-run-start', addRunningTest);
-            task.once('test-run-done', removeRunningTest);
+            task.on('test-run-start', addRunningTest);
+            task.on('test-run-done', removeRunningTest);
         }
 
         task.on('done', stopHandlingTestErrors);
 
-        const setCompleted = () => {
+        task.on('error', stopHandlingTestErrors);
+
+        const onTaskCompleted = () => {
+            task.unRegisterClientScriptRouting();
+
             completed = true;
         };
 
         completionPromise
-            .then(setCompleted)
-            .catch(setCompleted);
+            .then(onTaskCompleted)
+            .catch(onTaskCompleted);
 
         const cancelTask = async () => {
             if (!completed)
@@ -171,6 +208,19 @@ export default class Runner extends EventEmitter {
 
     _registerAssets (assets) {
         assets.forEach(asset => this.proxy.GET(asset.path, asset.info));
+    }
+
+    _validateDebugLogger () {
+        const debugLogger = this.configuration.getOption(OPTION_NAMES.debugLogger);
+
+        const debugLoggerDefinedCorrectly = debugLogger === null || !!debugLogger &&
+            ['showBreakpoint', 'hideBreakpoint'].every(method => method in debugLogger && isFunction(debugLogger[method]));
+
+        if (!debugLoggerDefinedCorrectly) {
+            this.configuration.mergeOptions({
+                [OPTION_NAMES.debugLogger]: defaultDebugLogger
+            });
+        }
     }
 
     _validateSpeedOption () {
@@ -193,6 +243,15 @@ export default class Runner extends EventEmitter {
             throw new GeneralError(RUNTIME_ERRORS.invalidConcurrencyFactor);
     }
 
+    _validateRequestTimeoutOption (optionName) {
+        const requestTimeout = this.configuration.getOption(optionName);
+
+        if (requestTimeout === void 0)
+            return;
+
+        assertType(is.nonNegativeNumber, null, `"${optionName}" option`, requestTimeout);
+    }
+
     _validateProxyBypassOption () {
         let proxyBypass = this.configuration.getOption(OPTION_NAMES.proxyBypass);
 
@@ -213,21 +272,39 @@ export default class Runner extends EventEmitter {
         this.configuration.mergeOptions({ proxyBypass });
     }
 
+    _getScreenshotOptions () {
+        let { path, pathPattern } = this.configuration.getOption(OPTION_NAMES.screenshots) || {};
+
+        if (!path)
+            path = this.configuration.getOption(OPTION_NAMES.screenshotPath);
+
+        if (!pathPattern)
+            pathPattern = this.configuration.getOption(OPTION_NAMES.screenshotPathPattern);
+
+        return { path, pathPattern };
+    }
+
     _validateScreenshotOptions () {
-        const screenshotPath        = this.configuration.getOption(OPTION_NAMES.screenshotPath);
-        const screenshotPathPattern = this.configuration.getOption(OPTION_NAMES.screenshotPathPattern);
+        const { path, pathPattern } = this._getScreenshotOptions();
 
-        if (screenshotPath) {
-            this._validateScreenshotPath(screenshotPath, 'screenshots base directory path');
+        const disableScreenshots = this.configuration.getOption(OPTION_NAMES.disableScreenshots) || !path;
 
-            this.configuration.mergeOptions({ [OPTION_NAMES.screenshotPath]: resolvePath(screenshotPath) });
+        this.configuration.mergeOptions({ [OPTION_NAMES.disableScreenshots]: disableScreenshots });
+
+        if (disableScreenshots)
+            return;
+
+        if (path) {
+            this._validateScreenshotPath(path, 'screenshots base directory path');
+
+            this.configuration.mergeOptions({ [OPTION_NAMES.screenshots]: { path: resolvePath(path) } });
         }
 
-        if (screenshotPathPattern)
-            this._validateScreenshotPath(screenshotPathPattern, 'screenshots path pattern');
+        if (pathPattern) {
+            this._validateScreenshotPath(pathPattern, 'screenshots path pattern');
 
-        if (!screenshotPath && screenshotPathPattern)
-            throw new GeneralError(RUNTIME_ERRORS.cannotUseScreenshotPathPatternWithoutBaseScreenshotPathSpecified);
+            this.configuration.mergeOptions({ [OPTION_NAMES.screenshots]: { pathPattern } });
+        }
     }
 
     async _validateVideoOptions () {
@@ -260,12 +337,55 @@ export default class Runner extends EventEmitter {
             throw new GeneralError(RUNTIME_ERRORS.cannotFindFFMPEG);
     }
 
+    _validateCompilerOptions () {
+        const compilerOptions = this.configuration.getOption(OPTION_NAMES.compilerOptions);
+
+        if (!compilerOptions)
+            return;
+
+        const specifiedCompilers  = Object.keys(compilerOptions);
+        const customizedCompilers = Object.keys(CustomizableCompilers);
+        const wrongCompilers      = specifiedCompilers.filter(compiler => !customizedCompilers.includes(compiler));
+
+        if (!wrongCompilers.length)
+            return;
+
+        const compilerListStr = getConcatenatedValuesString(wrongCompilers, void 0, "'");
+        const pluralSuffix    = getPluralSuffix(wrongCompilers);
+
+        throw new GeneralError(RUNTIME_ERRORS.cannotCustomizeSpecifiedCompilers, compilerListStr, pluralSuffix);
+    }
+
+    _validateRetryTestPagesOption () {
+        const retryTestPagesOption = this.configuration.getOption(OPTION_NAMES.retryTestPages);
+
+        if (!retryTestPagesOption)
+            return;
+
+        const ssl = this.configuration.getOption(OPTION_NAMES.ssl);
+
+        if (ssl)
+            return;
+
+        const hostname = this.configuration.getOption(OPTION_NAMES.hostname);
+
+        if (isLocalhost(hostname))
+            return;
+
+        throw new GeneralError(RUNTIME_ERRORS.cannotEnableRetryTestPagesOption);
+    }
+
     async _validateRunOptions () {
+        this._validateDebugLogger();
         this._validateScreenshotOptions();
         await this._validateVideoOptions();
         this._validateSpeedOption();
         this._validateConcurrencyOption();
         this._validateProxyBypassOption();
+        this._validateCompilerOptions();
+        this._validateRetryTestPagesOption();
+        this._validateRequestTimeoutOption(OPTION_NAMES.pageRequestTimeout);
+        this._validateRequestTimeoutOption(OPTION_NAMES.ajaxRequestTimeout);
     }
 
     _createRunnableConfiguration () {
@@ -287,15 +407,33 @@ export default class Runner extends EventEmitter {
 
     _setBootstrapperOptions () {
         this.configuration.prepare();
-        this.configuration.notifyAboutOverridenOptions();
+        this.configuration.notifyAboutOverriddenOptions();
+        this.configuration.notifyAboutDeprecatedOptions();
 
-        this.bootstrapper.sources      = this.configuration.getOption(OPTION_NAMES.src) || this.bootstrapper.sources;
-        this.bootstrapper.browsers     = this.configuration.getOption(OPTION_NAMES.browsers) || this.bootstrapper.browsers;
-        this.bootstrapper.concurrency  = this.configuration.getOption(OPTION_NAMES.concurrency);
-        this.bootstrapper.appCommand   = this.configuration.getOption(OPTION_NAMES.appCommand) || this.bootstrapper.appCommand;
-        this.bootstrapper.appInitDelay = this.configuration.getOption(OPTION_NAMES.appInitDelay);
-        this.bootstrapper.filter       = this.configuration.getOption(OPTION_NAMES.filter) || this.bootstrapper.filter;
-        this.bootstrapper.reporters    = this.configuration.getOption(OPTION_NAMES.reporter) || this.bootstrapper.reporters;
+        this.bootstrapper.sources                = this.configuration.getOption(OPTION_NAMES.src) || this.bootstrapper.sources;
+        this.bootstrapper.browsers               = this.configuration.getOption(OPTION_NAMES.browsers) || this.bootstrapper.browsers;
+        this.bootstrapper.concurrency            = this.configuration.getOption(OPTION_NAMES.concurrency);
+        this.bootstrapper.appCommand             = this.configuration.getOption(OPTION_NAMES.appCommand) || this.bootstrapper.appCommand;
+        this.bootstrapper.appInitDelay           = this.configuration.getOption(OPTION_NAMES.appInitDelay);
+        this.bootstrapper.filter                 = this.configuration.getOption(OPTION_NAMES.filter) || this.bootstrapper.filter;
+        this.bootstrapper.reporters              = this.configuration.getOption(OPTION_NAMES.reporter) || this.bootstrapper.reporters;
+        this.bootstrapper.tsConfigPath           = this.configuration.getOption(OPTION_NAMES.tsConfigPath);
+        this.bootstrapper.clientScripts          = this.configuration.getOption(OPTION_NAMES.clientScripts) || this.bootstrapper.clientScripts;
+        this.bootstrapper.disableMultipleWindows = this.configuration.getOption(OPTION_NAMES.disableMultipleWindows);
+        this.bootstrapper.compilerOptions        = this.configuration.getOption(OPTION_NAMES.compilerOptions);
+    }
+
+    async _prepareClientScripts (tests, clientScripts) {
+        return Promise.all(tests.map(async test => {
+            if (test.isLegacy)
+                return;
+
+            let loadedTestClientScripts = await loadClientScripts(test.clientScripts, dirname(test.testFile.filename));
+
+            loadedTestClientScripts = clientScripts.concat(loadedTestClientScripts);
+
+            test.clientScripts = setUniqueUrls(loadedTestClientScripts);
+        }));
     }
 
     // API
@@ -365,12 +503,14 @@ export default class Runner extends EventEmitter {
         return this;
     }
 
-    screenshots (path, takeOnFails, pattern) {
-        this.configuration.mergeOptions({
-            [OPTION_NAMES.screenshotPath]:         path,
-            [OPTION_NAMES.takeScreenshotsOnFails]: takeOnFails,
-            [OPTION_NAMES.screenshotPathPattern]:  pattern
-        });
+    screenshots (...options) {
+        let fullPage;
+        let [path, takeOnFails, pathPattern] = options;
+
+        if (options.length === 1 && options[0] && typeof options[0] === 'object')
+            ({ path, takeOnFails, pathPattern, fullPage } = options[0]);
+
+        this.configuration.mergeOptions({ screenshots: { path, takeOnFails, pathPattern, fullPage } });
 
         return this;
     }
@@ -394,43 +534,46 @@ export default class Runner extends EventEmitter {
         return this;
     }
 
-    run (options = {}) {
-        this.apiMethodWasCalled.reset();
-
-        const {
-            skipJsErrors,
-            disablePageReloads,
-            quarantineMode,
-            debugMode,
-            selectorTimeout,
-            assertionTimeout,
-            pageLoadTimeout,
-            speed,
-            debugOnFail,
-            skipUncaughtErrors,
-            stopOnFirstFail
-        } = options;
-
+    tsConfigPath (path) {
         this.configuration.mergeOptions({
-            skipJsErrors:       skipJsErrors,
-            disablePageReloads: disablePageReloads,
-            quarantineMode:     quarantineMode,
-            debugMode:          debugMode,
-            debugOnFail:        debugOnFail,
-            selectorTimeout:    selectorTimeout,
-            assertionTimeout:   assertionTimeout,
-            pageLoadTimeout:    pageLoadTimeout,
-            speed:              speed,
-            skipUncaughtErrors: skipUncaughtErrors,
-            stopOnFirstFail:    stopOnFirstFail
+            [OPTION_NAMES.tsConfigPath]: path
         });
 
+        return this;
+    }
+
+    clientScripts (...scripts) {
+        if (this.apiMethodWasCalled.clientScripts)
+            throw new GeneralError(RUNTIME_ERRORS.multipleAPIMethodCallForbidden, OPTION_NAMES.clientScripts);
+
+        scripts = this._prepareArrayParameter(scripts);
+
+        this.configuration.mergeOptions({ [OPTION_NAMES.clientScripts]: scripts });
+
+        this.apiMethodWasCalled.clientScripts = true;
+
+        return this;
+    }
+
+    compilerOptions (opts) {
+        this.configuration.mergeOptions({
+            [OPTION_NAMES.compilerOptions]: opts
+        });
+
+        return this;
+    }
+
+    run (options = {}) {
+        this.apiMethodWasCalled.reset();
+        this.configuration.mergeOptions(options);
         this._setBootstrapperOptions();
 
         const runTaskPromise = Promise.resolve()
             .then(() => this._validateRunOptions())
             .then(() => this._createRunnableConfiguration())
-            .then(({ reporterPlugins, browserSet, tests, testedApp }) => {
+            .then(async ({ reporterPlugins, browserSet, tests, testedApp, commonClientScripts }) => {
+                await this._prepareClientScripts(tests, commonClientScripts);
+
                 return this._runTask(reporterPlugins, browserSet, tests, testedApp);
             });
 

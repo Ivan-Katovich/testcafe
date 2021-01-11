@@ -1,9 +1,12 @@
 import hammerhead from '../deps/hammerhead';
-import * as styleUtils from './style';
 import * as arrayUtils from './array';
 
 const browserUtils  = hammerhead.utils.browser;
 const nativeMethods = hammerhead.nativeMethods;
+
+// NOTE: We have to retrieve styleUtils.get from hammerhead
+// to avoid circular dependencies between domUtils and styleUtils
+const getElementStyleProperty = hammerhead.utils.style.get;
 
 export const getActiveElement                       = hammerhead.utils.dom.getActiveElement;
 export const findDocument                           = hammerhead.utils.dom.findDocument;
@@ -25,6 +28,7 @@ export const isTextAreaElement                      = hammerhead.utils.dom.isTex
 export const isAnchorElement                        = hammerhead.utils.dom.isAnchorElement;
 export const isImgElement                           = hammerhead.utils.dom.isImgElement;
 export const isFormElement                          = hammerhead.utils.dom.isFormElement;
+export const isLabelElement                         = hammerhead.utils.dom.isLabelElement;
 export const isSelectElement                        = hammerhead.utils.dom.isSelectElement;
 export const isRadioButtonElement                   = hammerhead.utils.dom.isRadioButtonElement;
 export const isColorInputElement                    = hammerhead.utils.dom.isColorInputElement;
@@ -42,6 +46,7 @@ export const isTextEditableElementAndEditingAllowed = hammerhead.utils.dom.isTex
 export const isContentEditableElement               = hammerhead.utils.dom.isContentEditableElement;
 export const isDomElement                           = hammerhead.utils.dom.isDomElement;
 export const isShadowUIElement                      = hammerhead.utils.dom.isShadowUIElement;
+export const isShadowRoot                           = hammerhead.utils.dom.isShadowRoot;
 export const isElementFocusable                     = hammerhead.utils.dom.isElementFocusable;
 export const isHammerheadAttr                       = hammerhead.utils.dom.isHammerheadAttr;
 export const isElementReadOnly                      = hammerhead.utils.dom.isElementReadOnly;
@@ -175,7 +180,7 @@ export function getFocusableElements (doc, sort = false) {
         if (element.disabled)
             continue;
 
-        if (styleUtils.get(element, 'display') === 'none' || styleUtils.get(element, 'visibility') === 'hidden')
+        if (getElementStyleProperty(element, 'display') === 'none' || getElementStyleProperty(element, 'visibility') === 'hidden')
             continue;
 
         if ((browserUtils.isIE || browserUtils.isAndroid) && isOptionElement(element))
@@ -216,7 +221,7 @@ function getInvisibleElements (elements) {
     const invisibleElements = [];
 
     for (let i = 0; i < elements.length; i++) {
-        if (styleUtils.get(elements[i], 'display') === 'none')
+        if (getElementStyleProperty(elements[i], 'display') === 'none')
             invisibleElements.push(elements[i]);
     }
 
@@ -311,7 +316,7 @@ export function isElementContainsNode (parentElement, childNode) {
     if (isTheSameNode(childNode, parentElement))
         return true;
 
-    const childNodes = parentElement.childNodes;
+    const childNodes = nativeMethods.nodeChildNodesGetter.call(parentElement);
     const length     = getChildNodesLength(childNodes);
 
     for (let i = 0; i < length; i++) {
@@ -445,7 +450,7 @@ export function getCommonAncestor (element1, element2) {
         if (arrayUtils.indexOf(el1Parents, commonAncestor) > -1)
             return commonAncestor;
 
-        commonAncestor = commonAncestor.parentNode;
+        commonAncestor = nativeMethods.nodeParentNodeGetter.call(commonAncestor);
     }
 
     return commonAncestor;
@@ -497,4 +502,18 @@ export function setElementValue (element, value) {
     /*eslint-enable no-restricted-properties*/
 
     return value;
+}
+
+export function isShadowElement (element) {
+    return element && element.getRootNode && findDocument(element) !== element.getRootNode();
+}
+
+export function contains (element, target) {
+    if (!element || !target)
+        return false;
+
+    if (element.contains)
+        return element.contains(target);
+
+    return !!findParent(target, true, node => node === element);
 }

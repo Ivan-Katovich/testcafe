@@ -1,9 +1,9 @@
-import Promise from 'pinkie';
 import { GeneralError } from './errors/runtime';
 import { RUNTIME_ERRORS } from './errors/types';
 import embeddingUtils from './embedding-utils';
 import exportableLib from './api/exportable-lib';
-import Configuration from './configuration';
+import TestCafeConfiguration from './configuration/testcafe-configuration';
+import OPTION_NAMES from './configuration/option-names';
 
 const lazyRequire   = require('import-lazy')(require);
 const TestCafe      = lazyRequire('./testcafe');
@@ -38,22 +38,35 @@ async function getValidPort (port) {
 }
 
 // API
-async function createTestCafe (hostname, port1, port2, sslOptions, developmentMode, retryTestPages) {
-    const configuration = new Configuration();
+async function getConfiguration (args) {
+    const configuration = new TestCafeConfiguration();
 
-    await configuration.init({
-        hostname,
-        port1,
-        port2,
-        ssl: sslOptions,
-        developmentMode,
-        retryTestPages
-    });
+    if (args.length === 1 && typeof args[0] === 'object')
+        await configuration.init(args[0]);
+    else {
+        const [hostname, port1, port2, ssl, developmentMode, retryTestPages] = args;
 
-    [hostname, port1, port2] = await Promise.all([
-        getValidHostname(configuration.getOption('hostname')),
-        getValidPort(configuration.getOption('port1')),
-        getValidPort(configuration.getOption('port2'))
+        await configuration.init({
+            hostname,
+            port1,
+            port2,
+            ssl,
+            developmentMode,
+            retryTestPages
+        });
+    }
+
+    return configuration;
+}
+
+// API
+async function createTestCafe (...args) {
+    const configuration = await getConfiguration(args);
+
+    const [hostname, port1, port2] = await Promise.all([
+        getValidHostname(configuration.getOption(OPTION_NAMES.hostname)),
+        getValidPort(configuration.getOption(OPTION_NAMES.port1)),
+        getValidPort(configuration.getOption(OPTION_NAMES.port2))
     ]);
 
     configuration.mergeOptions({ hostname, port1, port2 });
